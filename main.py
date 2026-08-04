@@ -1,5 +1,5 @@
 """
-main.py - Scanner V4 with Looser Filters
+main.py - Scanner V5 (Intraday Optimized)
 """
 
 import warnings
@@ -11,11 +11,11 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
-from pair_engine import PairEngineV4
+from pair_engine import PairEngineV5
 from universe import StockUniverse
 
 print("=" * 60)
-print("📊 PAIR SCANNER V4 (LOOSER FILTERS + DEBUG)")
+print("📊 PAIR SCANNER V5 (INTRADAY OPTIMIZED)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -73,7 +73,7 @@ test_symbols = liquid_stocks[:20]
 print(f"   Fetching {len(test_symbols)} stocks...")
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
-close_data = fetcher.fetch_close_prices(test_symbols, interval="ONE_MINUTE", days=3)
+close_data = fetcher.fetch_close_prices(test_symbols, interval="ONE_MINUTE", days=5)
 
 if close_data.empty:
     print("❌ No data fetched. Exiting.")
@@ -81,24 +81,18 @@ if close_data.empty:
 
 print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
 
-# ========== PAIR ENGINE V4 ==========
+# ========== PAIR ENGINE V5 ==========
 print("\n" + "=" * 60)
-print("🔧 RUNNING PAIR ENGINE V4 (LOOSER FILTERS)")
+print("🔧 RUNNING PAIR ENGINE V5 (INTRADAY)")
 print("=" * 60)
 
-engine = PairEngineV4(close_data)
+engine = PairEngineV5(close_data)
 
-# Looser filters
 results = engine.scan_pairs(filters={
-    'same_sector': False,      # Disable sector filter
-    'min_correlation': 0.5,    # Looser correlation
-    'max_pval': 0.10           # Same coint p-value
+    'min_correlation': 0.6
 })
 
-# Show debug report
 engine.display_debug_report(n=20)
-
-# Show results
 engine.display_results(n=10)
 
 # ========== SAVE ==========
@@ -107,17 +101,16 @@ if results:
         'pair1': r['pair'][0],
         'pair2': r['pair'][1],
         'correlation': r['metrics']['correlation'],
-        'coint_pval': r['metrics']['coint_pval'],
-        'beta': r['metrics']['beta'],
-        'hurst': r['metrics']['hurst'],
-        'half_life': r['metrics']['half_life'],
+        'rolling_corr': r['metrics']['rolling_corr'],
         'zscore': r['metrics']['zscore'],
+        'atr': r['metrics']['atr'],
+        'price_ratio': r['metrics']['price_ratio'],
         'score': r['metrics']['score'],
         'signal': r['metrics']['signal']
     } for r in results])
     
-    df_results.to_csv('pairs_results_v4.csv', index=False)
-    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results_v4.csv'")
+    df_results.to_csv('pairs_results_v5.csv', index=False)
+    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results_v5.csv'")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
