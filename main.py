@@ -1,20 +1,16 @@
-"""
-📊 PAIR TRADING SCANNER - Angel One API
-Fully fixed for GitHub Actions
-"""
-
 import subprocess
 import sys
 import os
 import warnings
 warnings.filterwarnings('ignore')
 
-# ========== FORCE INSTALL SMARTAPI ==========
-def install_smartapi():
+# ========== INSTALL AND IMPORT ==========
+def install_and_import():
     try:
-        import SmartApi
+        # Try direct import
+        from SmartApi import SmartConnect
         print("✅ SmartApi already installed")
-        return True
+        return SmartConnect
     except ImportError:
         print("📦 Installing smartapi-python...")
         try:
@@ -24,25 +20,39 @@ def install_smartapi():
                 "--no-cache-dir",
                 "--timeout", "60"
             ])
-            import SmartApi
+            # After install, try import again
+            from SmartApi import SmartConnect
             print("✅ SmartApi installed successfully")
-            return True
+            return SmartConnect
         except Exception as e:
-            print(f"❌ Failed to install SmartApi: {e}")
-            return False
+            print(f"❌ Failed: {e}")
+            
+            # Try alternative package
+            print("🔄 Trying smartapi...")
+            try:
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install",
+                    "smartapi",
+                    "--no-cache-dir"
+                ])
+                from smartapi import SmartConnect
+                print("✅ Installed via smartapi")
+                return SmartConnect
+            except:
+                print("❌ Both packages failed")
+                return None
 
-if not install_smartapi():
+SmartConnect = install_and_import()
+if SmartConnect is None:
     print("❌ Cannot proceed without SmartApi")
     sys.exit(1)
 
-# ========== IMPORTS ==========
-from SmartApi import SmartConnect
+# ========== REST OF CODE ==========
 import pandas as pd
 import numpy as np
 from itertools import combinations
 from statsmodels.tsa.stattools import coint
 
-# ========== CONFIG ==========
 class Config:
     ANGEL_API_KEY = os.getenv("ANGEL_API_KEY", "YOUR_API_KEY")
     ANGEL_CLIENT_ID = os.getenv("ANGEL_CLIENT_ID", "YOUR_CLIENT_ID")
@@ -51,7 +61,6 @@ class Config:
     TOP_PAIRS = 20
     COINT_THRESHOLD = 0.10
 
-# ========== ANGEL BROKER ==========
 class AngelBroker:
     def __init__(self):
         self.obj = None
@@ -104,7 +113,6 @@ class AngelBroker:
             print(f"⚠️ Error fetching {symbol}: {e}")
             return None
 
-# ========== DATA FETCHER ==========
 def get_data(symbols, broker):
     print(f"\n📊 Fetching {len(symbols)} stocks...")
     close_data = pd.DataFrame()
@@ -121,7 +129,6 @@ def get_data(symbols, broker):
     print(f"\n✅ Retrieved data for {len(close_data.columns)} stocks")
     return close_data
 
-# ========== PAIR SCANNER ==========
 def scan_pairs(data, threshold=0.10, top_n=20):
     print(f"\n🔍 Scanning {len(data.columns)} stocks...")
     print(f"Total pairs: {len(data.columns) * (len(data.columns) - 1) // 2}")
@@ -149,21 +156,17 @@ def scan_pairs(data, threshold=0.10, top_n=20):
     results.sort(key=lambda x: x['score'], reverse=True)
     return results[:top_n]
 
-# ========== MAIN ==========
 def main():
     print("=" * 60)
     print("📊 PAIR TRADING SCANNER (Angel One)")
     print("=" * 60)
     print(f"Python: {sys.version}")
     
-    # Login
     broker = AngelBroker()
     if not broker.login():
         print("\n❌ Login Failed. Check secrets.")
-        print("   ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP")
         return
     
-    # Fetch data
     symbols = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "HINDUNILVR", "ITC"]
     data = get_data(symbols, broker)
     
@@ -171,10 +174,8 @@ def main():
         print("❌ Not enough data. Exiting.")
         return
     
-    # Scan
     results = scan_pairs(data, threshold=Config.COINT_THRESHOLD, top_n=Config.TOP_PAIRS)
     
-    # Display
     print("\n" + "=" * 60)
     print(f"🏆 TOP {len(results)} COINTEGRATED PAIRS")
     print("=" * 60)
@@ -188,7 +189,6 @@ def main():
         print(f"{i}. {signal} {r['pair1']:15} ↔ {r['pair2']:15}")
         print(f"   Corr: {r['corr']:.3f} | p-val: {r['pval']:.4f} | Score: {r['score']:.1f}")
     
-    # Save
     pd.DataFrame(results).to_csv('pairs.csv', index=False)
     print(f"\n📁 Results saved to 'pairs.csv' ({len(results)} pairs)")
 
