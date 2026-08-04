@@ -1,11 +1,10 @@
 """
-data_fetcher.py - Historical OHLC Data Fetcher with Token Support
+data_fetcher.py - Historical OHLC Data Fetcher with Correct Date Format
 """
 
 import pandas as pd
 import datetime
 import time
-import json
 from typing import List, Optional, Dict, Any
 
 class AngelDataFetcher:
@@ -25,19 +24,30 @@ class AngelDataFetcher:
             print(f"❌ Token not found for {symbol}")
             return None
         
-        from_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-        to_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        # 🔧 FIX 1: Include Time in Date Format
+        today = datetime.datetime.now()
+        
+        # Get market open time (9:15 AM)
+        from_date = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d 09:15")
+        to_date = today.strftime("%Y-%m-%d 15:30")
+        
+        # 🔧 FIX 2: If today is weekend, adjust to last trading day
+        if today.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            # Go back to Friday
+            friday = today - datetime.timedelta(days=(today.weekday() - 4))
+            to_date = friday.strftime("%Y-%m-%d 15:30")
+            from_date = (friday - datetime.timedelta(days=days)).strftime("%Y-%m-%d 09:15")
+        
+        print(f"\n📤 Request Debug for {symbol}:")
+        print(f"  Token: {token}")
+        print(f"  Interval: {interval}")
+        print(f"  From: {from_date}")
+        print(f"  To: {to_date}")
         
         for attempt in range(self.max_retries):
             try:
-                # 🔧 DEBUG: Print request parameters
-                print(f"\n📤 Request Debug for {symbol}:")
-                print(f"  Token: {token}")
-                print(f"  Interval: {interval}")
-                print(f"  From: {from_date}")
-                print(f"  To: {to_date}")
-                
-                # Method 1: Try with dictionary
+                # 🔧 FIX 3: Try both formats
+                # Format A: Dictionary with date-time
                 params = {
                     "exchange": "NSE",
                     "symboltoken": token,
@@ -47,10 +57,16 @@ class AngelDataFetcher:
                 }
                 print(f"  Params: {params}")
                 
-                resp = self.obj.getCandleData(params)
+                # 🔧 FIX 4: Try getCandleData with params
+                try:
+                    resp = self.obj.getCandleData(params)
+                except TypeError:
+                    # If TypeError, try without exchange
+                    params.pop("exchange", None)
+                    resp = self.obj.getCandleData(params)
                 
                 print(f"  Response type: {type(resp)}")
-                print(f"  Response: {str(resp)[:200]}")
+                print(f"  Response: {str(resp)[:300] if resp else 'None'}")
                 
                 if resp and resp.get('status') == True and resp.get('data'):
                     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
