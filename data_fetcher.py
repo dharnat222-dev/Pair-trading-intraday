@@ -1,5 +1,5 @@
 """
-data_fetcher.py - Historical OHLC Data Fetcher
+data_fetcher.py - Historical OHLC Data Fetcher with Token Support
 """
 
 import pandas as pd
@@ -8,25 +8,42 @@ import time
 from typing import List, Optional, Dict, Any
 
 class AngelDataFetcher:
-    def __init__(self, smartconnect_obj: Any):
+    def __init__(self, smartconnect_obj: Any, instrument_manager: Any):
+        """
+        Args:
+            smartconnect_obj: Logged-in SmartConnect instance
+            instrument_manager: InstrumentManager instance with token mapping
+        """
         self.obj = smartconnect_obj
+        self.instrument = instrument_manager
         self.max_retries = 3
         self.retry_delay = 1
     
     def fetch(self, symbol: str, interval: str = "ONE_MINUTE", days: int = 5) -> Optional[pd.DataFrame]:
+        """
+        Fetch historical OHLC data for a symbol using token
+        """
+        # Get token for symbol
+        token = self.instrument.get_token(symbol)
+        if not token:
+            print(f"❌ Token not found for {symbol}")
+            return None
+        
         from_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         to_date = datetime.datetime.now().strftime("%Y-%m-%d")
         
         for attempt in range(self.max_retries):
             try:
-                # 🔧 FIX: Positional arguments: exchange, symbol, interval, fromdate, todate
-                resp = self.obj.getCandleData(
-                    "NSE",      # exchange
-                    symbol,     # symbol
-                    interval,   # interval
-                    from_date,  # fromdate
-                    to_date     # todate
-                )
+                # 🔧 FIX: Use token in params dict
+                params = {
+                    "exchange": "NSE",
+                    "symboltoken": token,
+                    "interval": interval,
+                    "fromdate": from_date,
+                    "todate": to_date
+                }
+                
+                resp = self.obj.getCandleData(params)
                 
                 if resp and resp.get('status') == True and resp.get('data'):
                     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
