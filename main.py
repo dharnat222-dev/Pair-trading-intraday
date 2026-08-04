@@ -1,5 +1,5 @@
 from config import *
-
+from angel_login import connect
 print("======================================")
 print(APP_NAME)
 print("Version:", VERSION)
