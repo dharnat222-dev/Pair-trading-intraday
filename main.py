@@ -1,5 +1,5 @@
 """
-main.py - Scanner V6 (Professional)
+main.py - Scanner V7 (Professional)
 """
 
 import warnings
@@ -11,11 +11,12 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
-from pair_engine_v6 import PairEngineV6
+from pair_engine_v7 import PairEngineV7
 from universe import StockUniverse
+from sector_map import SECTOR_MAP
 
 print("=" * 60)
-print("📊 PAIR SCANNER V6 (PROFESSIONAL)")
+print("📊 PAIR SCANNER V7 (PROFESSIONAL)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -73,12 +74,12 @@ print("=" * 60)
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-# Fetch daily data for all liquid stocks
+# Fetch daily data - 180 days minimum
 print(f"\n📊 Fetching daily data for {len(liquid_stocks)} stocks...")
 close_data_daily = fetcher.fetch_close_prices(
     liquid_stocks, 
     interval="ONE_DAY", 
-    days=30
+    days=180  # Increased from 30 to 180
 )
 
 if close_data_daily.empty:
@@ -87,19 +88,21 @@ if close_data_daily.empty:
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
-# Run Pair Engine
-engine = PairEngineV6(close_data_daily)
+# Run Pair Engine V7 with Sector Map
+engine = PairEngineV7(close_data_daily, SECTOR_MAP)
 results = engine.scan_pairs()
 
 engine.display_debug_report(n=20)
 engine.display_results(n=30)
 
 # Save top pairs
-top_pairs = engine.get_top_pairs(n=50)
+top_pairs = engine.get_top_pairs(n=30)
 df_pairs = pd.DataFrame([{
     'pair1': r['pair'][0],
     'pair2': r['pair'][1],
+    'sector': engine._get_sector(r['pair'][0]),
     'correlation': r['metrics']['correlation'],
+    'rolling_corr': r['metrics']['rolling_corr'],
     'coint_pval': r['metrics']['coint_pval'],
     'beta': r['metrics']['beta'],
     'hurst': r['metrics']['hurst'],
@@ -107,8 +110,8 @@ df_pairs = pd.DataFrame([{
     'score': r['metrics']['score']
 } for r in top_pairs])
 
-df_pairs.to_csv('selected_pairs.csv', index=False)
-print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs.csv'")
+df_pairs.to_csv('selected_pairs_v7.csv', index=False)
+print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs_v7.csv'")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
