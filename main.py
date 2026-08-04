@@ -1,5 +1,9 @@
+from config import *
+
 print("======================================")
-print("PAIR TRADING INTRADAY SCANNER")
-print("Version 1.0")
+print(APP_NAME)
+print("Version:", VERSION)
 print("======================================")
+print("Exchange :", EXCHANGE)
+print("Timeframe:", TIMEFRAME)
 print("Loading modules...")
