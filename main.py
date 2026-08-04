@@ -1,5 +1,5 @@
 """
-main.py - Complete Pair Trading Scanner (Stage-1 + Stage-2)
+main.py - Pair Scanner with Instrument Check
 """
 
 import warnings
@@ -12,12 +12,11 @@ import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
 from pair_engine_v7 import PairEngineV7
-from live_entry_scanner import LiveEntryScanner
 from universe import StockUniverse
 from sector_map import SECTOR_MAP
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER (Stage-1 + Stage-2)")
+print("📊 PAIR TRADING SCANNER")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -57,7 +56,9 @@ print("✅ Login Successful!")
 # ========== INSTRUMENTS ==========
 print("\n📥 Loading instruments...")
 instrument_mgr = InstrumentManager(obj)
-instrument_mgr.load_master_contract()
+if not instrument_mgr.load_master_contract():
+    print("\n❌ Failed to load instruments. Exiting...")
+    sys.exit(1)
 
 # ========== UNIVERSE ==========
 print("\n🌐 Building trading universe...")
@@ -67,6 +68,10 @@ liquid_stocks = universe.filter_liquid_stocks()
 
 print(f"   Total NSE stocks: {len(all_stocks)}")
 print(f"   Liquid stocks: {len(liquid_stocks)}")
+
+if not liquid_stocks:
+    print("\n❌ No liquid stocks found. Exiting...")
+    sys.exit(1)
 
 # ========== STAGE-1: PAIR SELECTION ==========
 print("\n" + "=" * 60)
@@ -79,11 +84,15 @@ print(f"\n📊 Fetching daily data for {len(liquid_stocks)} stocks...")
 close_data_daily = fetcher.fetch_close_prices(
     liquid_stocks, 
     interval="ONE_DAY", 
-    days=250  # 1 year of data
+    days=250
 )
 
 if close_data_daily.empty:
     print("❌ No daily data fetched. Exiting.")
+    sys.exit(1)
+
+if len(close_data_daily.columns) < 5:
+    print(f"❌ Only {len(close_data_daily.columns)} stocks available. Minimum 5 required.")
     sys.exit(1)
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
@@ -97,42 +106,24 @@ engine.display_results(n=20)
 
 # Save top pairs
 top_pairs = engine.get_top_pairs(n=20)
-df_pairs = pd.DataFrame([{
-    'pair1': r['pair'][0],
-    'pair2': r['pair'][1],
-    'sector': engine._get_sector(r['pair'][0]),
-    'correlation': r['metrics']['correlation'],
-    'rolling_corr': r['metrics']['rolling_corr'],
-    'coint_pval': r['metrics']['coint_pval'],
-    'beta': r['metrics']['beta'],
-    'hurst': r['metrics']['hurst'],
-    'half_life': r['metrics']['half_life'],
-    'score': r['metrics']['score']
-} for r in top_pairs])
-
-df_pairs.to_csv('selected_pairs_v7.csv', index=False)
-print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs_v7.csv'")
-
-# ========== STAGE-2: LIVE ENTRY SCANNER ==========
-print("\n" + "=" * 60)
-print("📊 STAGE 2: LIVE ENTRY SCANNER (5-min Z-Score)")
-print("=" * 60)
-
 if top_pairs:
-    # Initialize live scanner
-    live_scanner = LiveEntryScanner(fetcher, instrument_mgr)
-    live_scanner.set_pairs(top_pairs)
+    df_pairs = pd.DataFrame([{
+        'pair1': r['pair'][0],
+        'pair2': r['pair'][1],
+        'sector': engine._get_sector(r['pair'][0]),
+        'correlation': r['metrics']['correlation'],
+        'rolling_corr': r['metrics']['rolling_corr'],
+        'coint_pval': r['metrics']['coint_pval'],
+        'beta': r['metrics']['beta'],
+        'hurst': r['metrics']['hurst'],
+        'half_life': r['metrics']['half_life'],
+        'score': r['metrics']['score']
+    } for r in top_pairs])
     
-    # Run single scan
-    print("\n🔄 Running entry scan...")
-    signals = live_scanner.scan_all_pairs(days=3)
-    live_scanner.display_signals(signals)
-    
-    # Ask for continuous scan
-    # Uncomment below for continuous scanning
-    # live_scanner.run_continuous_scan(interval_minutes=5, max_runs=5)
+    df_pairs.to_csv('selected_pairs_v7.csv', index=False)
+    print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs_v7.csv'")
 else:
-    print("❌ No pairs selected for live monitoring")
+    print("\n❌ No pairs selected. Check debug report.")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
