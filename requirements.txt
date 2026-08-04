@@ -1,11 +1,11 @@
-smartapi-python==1.5.5
-pyotp
-websocket-client
+smartapi-python
 pandas
 numpy
-scipy
 statsmodels
-scikit-learn
+scipy
+yfinance
 ta
+websocket-client
 requests
 openpyxl
+python-dotenv
