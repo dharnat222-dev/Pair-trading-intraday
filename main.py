@@ -1,5 +1,5 @@
 """
-Test DataFetcher with Angel One Login
+main.py - Test DataFetcher with Angel One
 """
 
 import warnings
@@ -9,12 +9,13 @@ import sys
 import os
 import pyotp
 import pandas as pd
+from src.data_fetcher import AngelDataFetcher
 
 print("=" * 60)
 print("📊 DATA FETCHER TEST")
 print("=" * 60)
 
-# ========== SMARTAPI IMPORT ==========
+# ========== IMPORTS ==========
 try:
     from SmartApi import SmartConnect
     print("✅ SmartApi imported!")
@@ -60,8 +61,30 @@ print("✅ Login Successful!")
 # ========== FETCH DATA ==========
 print("\n📊 Fetching historical data...")
 
-# We'll add DataFetcher here later
-print("✅ DataFetcher will be imported in next step")
+fetcher = AngelDataFetcher(obj)
+
+# Test symbols
+symbols = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS"]
+
+print(f"\n  Fetching {len(symbols)} symbols:")
+for sym in symbols:
+    print(f"    - {sym}")
+
+# Fetch close prices
+close_data = fetcher.fetch_close_prices(symbols, interval="ONE_MINUTE", days=3)
+
+print(f"\n✅ Data fetched: {len(close_data)} rows, {len(close_data.columns)} columns")
+print(f"   Columns: {list(close_data.columns)}")
+
+if not close_data.empty:
+    print("\n📊 Sample data (first 5 rows):")
+    print(close_data.head())
+    
+    # Save to CSV
+    close_data.to_csv('close_prices.csv')
+    print("\n📁 Saved to 'close_prices.csv'")
+else:
+    print("❌ No data fetched!")
 
 print("\n" + "=" * 60)
 print("✅ Test Passed!")
