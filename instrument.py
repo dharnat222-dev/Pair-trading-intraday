@@ -1,11 +1,10 @@
 """
-instrument.py - Scrip Master Download from Angel One
+instrument.py - Instrument Manager with Cache-First Strategy
 """
 
 import json
 import requests
 import os
-import gzip
 from typing import Optional, Dict
 
 class InstrumentManager:
@@ -14,39 +13,53 @@ class InstrumentManager:
         self.token_map: Dict[str, str] = {}
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
+        self.cache_file = "token_cache.json"
     
-    def download_scrip_master(self) -> bool:
+    def load_master_contract(self) -> bool:
         """
-        Download Scrip Master JSON from Angel One
+        Load instruments with cache-first strategy
+        """
+        # Step 1: Try to load from cache
+        if self.load_cache():
+            print("✅ Using cached instruments")
+            return True
+        
+        # Step 2: Try to download from primary URL
+        urls = [
+            "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
+            "https://margincalculator.angelbroking.com/OpenAPI_ScripMaster.json"
+        ]
+        
+        for url in urls:
+            print(f"📥 Attempting download from: {url}")
+            if self.download_scrip_master(url):
+                self.save_cache()
+                return True
+        
+        # Step 3: If all fails, use emergency hardcoded tokens
+        print("⚠️ All download attempts failed. Using emergency hardcoded tokens...")
+        self._load_emergency_tokens()
+        return True
+    
+    def download_scrip_master(self, url: str) -> bool:
+        """
+        Download Scrip Master JSON from given URL
         """
         try:
-            print("📥 Downloading Scrip Master...")
-            
-            # Scrip Master URL (Angel One Open API)
-            url = "https://margincalculator.angelbroking.com/OpenAPI_ScripMaster.json"
-            
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=15)
             
             print(f"  Status: {response.status_code}")
-            print(f"  Content-Type: {response.headers.get('Content-Type', 'Unknown')}")
-            print(f"  Content-Length: {len(response.text)}")
             
             if response.status_code != 200:
-                print(f"❌ Download failed: {response.status_code}")
                 return False
             
-            # Parse JSON
-            try:
-                data = response.json()
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON Parse Error: {e}")
+            # Check if response is JSON
+            if 'application/json' not in response.headers.get('Content-Type', ''):
                 return False
             
+            data = response.json()
             if not data:
-                print("❌ No data received")
                 return False
-            
-            print(f"✅ Downloaded {len(data)} instruments")
             
             # Build token maps
             self.token_map = {}
@@ -58,7 +71,6 @@ class InstrumentManager:
                 exchange = item.get('exch_seg', '')
                 
                 if symbol and token and exchange in ['NSE', 'NSEFO']:
-                    # Store with multiple formats
                     self.token_map[symbol] = token
                     self.token_map[f"{symbol}.NS"] = token
                     self.symbol_map[token] = symbol
@@ -67,12 +79,32 @@ class InstrumentManager:
             print(f"✅ Loaded {len(self.token_map)} symbols")
             return True
             
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Request Exception: {e}")
-            return False
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ Download error: {e}")
             return False
+    
+    def _load_emergency_tokens(self):
+        """
+        Emergency hardcoded tokens for common stocks
+        """
+        emergency_tokens = {
+            "RELIANCE": "2885", "HDFCBANK": "341", "ICICIBANK": "1333",
+            "SBIN": "112", "INFY": "408", "TCS": "512",
+            "HINDUNILVR": "1257", "ITC": "1660", "KOTAKBANK": "492",
+            "LT": "1395", "AXISBANK": "162", "WIPRO": "1706",
+            "MARUTI": "1690", "SUNPHARMA": "1842", "TITAN": "1858"
+        }
+        
+        self.token_map = {}
+        self.symbol_map = {}
+        
+        for symbol, token in emergency_tokens.items():
+            self.token_map[symbol] = token
+            self.token_map[f"{symbol}.NS"] = token
+            self.symbol_map[token] = symbol
+        
+        self._loaded = True
+        print(f"✅ Emergency tokens loaded: {len(self.token_map)} symbols")
     
     def load_cache(self, filepath: str = "token_cache.json") -> bool:
         """Load token map from cache"""
@@ -85,8 +117,8 @@ class InstrumentManager:
                     self._loaded = True
                     print(f"✅ Cache loaded: {len(self.token_map)} symbols")
                     return True
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ Cache load error: {e}")
         return False
     
     def save_cache(self, filepath: str = "token_cache.json") -> bool:
@@ -103,19 +135,6 @@ class InstrumentManager:
             print(f"⚠️ Could not save cache: {e}")
             return False
     
-    def load_master_contract(self) -> bool:
-        """Main method to load instruments"""
-        # First try cache
-        if self.load_cache():
-            return True
-        
-        # Then download from web
-        if self.download_scrip_master():
-            self.save_cache()
-            return True
-        
-        return False
-    
     def get_token(self, symbol: str) -> Optional[str]:
         """Get token for a symbol"""
         if not self._loaded:
@@ -128,7 +147,6 @@ class InstrumentManager:
         if token:
             return token
         
-        # Try without .NS suffix
         if symbol_upper.endswith('.NS'):
             token = self.token_map.get(symbol_upper[:-3])
             if token:
@@ -138,7 +156,6 @@ class InstrumentManager:
         return None
     
     def get_symbol(self, token: str) -> Optional[str]:
-        """Get symbol for a token"""
         return self.symbol_map.get(token)
     
     def is_loaded(self) -> bool:
