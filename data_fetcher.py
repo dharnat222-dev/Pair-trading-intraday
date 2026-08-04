@@ -19,12 +19,13 @@ class AngelDataFetcher:
         
         for attempt in range(self.max_retries):
             try:
-                # 🔧 FIX: Use 'tradingsymbol' instead of 'symbol'
+                # 🔧 FIX: Positional arguments: exchange, symbol, interval, fromdate, todate
                 resp = self.obj.getCandleData(
-                    tradingsymbol=symbol,
-                    interval=interval,
-                    fromdate=from_date,
-                    todate=to_date
+                    "NSE",      # exchange
+                    symbol,     # symbol
+                    interval,   # interval
+                    from_date,  # fromdate
+                    to_date     # todate
                 )
                 
                 if resp and resp.get('status') == True and resp.get('data'):
