@@ -3,7 +3,7 @@ instrument.py - Master Contract Manager for Angel One
 """
 
 import json
-import os
+import requests
 import pandas as pd
 from typing import Optional, Dict
 
@@ -13,39 +13,65 @@ class InstrumentManager:
         self.token_map: Dict[str, str] = {}
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
-        
-    def load_master_contract(self, exchange: str = "NSE") -> bool:
+    
+    def load_master_contract(self) -> bool:
+        """
+        Download master contract using REST API
+        """
         try:
-            print(f"📥 Downloading master contract for {exchange}...")
+            print("📥 Downloading master contract...")
             
-            # 🔧 FIX: Use getMasterContract instead of masterContract
-            if hasattr(self.obj, 'getMasterContract'):
-                master = self.obj.getMasterContract(exchange)
+            # SmartAPI v2 uses REST endpoint for master contract
+            url = "https://apiconnect.angelone.in/rest/secure/angelbroking/contract/v1/getMasterContract"
+            
+            # Headers for API call
+            headers = {
+                "X-UserType": "USER",
+                "X-SourceID": "WEB",
+                "X-ClientLocalIP": "127.0.0.1",
+                "X-ClientPublicIP": "127.0.0.1",
+                "X-MACAddress": "00:00:00:00:00:00",
+                "X-PrivateKey": self.obj.privateKey if hasattr(self.obj, 'privateKey') else "",
+                "X-AccessToken": self.obj.access_token if hasattr(self.obj, 'access_token') else "",
+                "Accept": "application/json"
+            }
+            
+            params = {
+                "segment": "NSE",
+                "status": "ACTIVE"
+            }
+            
+            response = requests.post(url, headers=headers, json=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == True and data.get('data'):
+                    self._build_maps(data['data'])
+                    self._loaded = True
+                    print(f"✅ Loaded {len(self.token_map)} symbols")
+                    return True
+                else:
+                    print(f"❌ API Error: {data}")
+                    return False
             else:
-                # Fallback: try direct attribute
-                master = self.obj.masterContract(exchange)
-            
-            if not master:
-                print("❌ No master contract data received")
+                print(f"❌ HTTP Error: {response.status_code}")
                 return False
-            
-            self.token_map = {}
-            self.symbol_map = {}
-            
-            for item in master:
-                symbol = item.get('symbol', '').upper()
-                token = item.get('token', '')
-                if symbol and token:
-                    self.token_map[symbol] = token
-                    self.symbol_map[token] = symbol
-            
-            self._loaded = True
-            print(f"✅ Loaded {len(self.token_map)} symbols")
-            return True
-            
+                
         except Exception as e:
             print(f"❌ Failed to load master contract: {e}")
             return False
+    
+    def _build_maps(self, master_data):
+        """Build token maps from master data"""
+        self.token_map = {}
+        self.symbol_map = {}
+        
+        for item in master_data:
+            symbol = item.get('symbolname', '').upper()
+            token = item.get('symboltoken', '')
+            if symbol and token:
+                self.token_map[symbol] = token
+                self.symbol_map[token] = symbol
     
     def get_token(self, symbol: str) -> Optional[str]:
         if not self._loaded:
