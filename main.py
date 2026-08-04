@@ -1,5 +1,5 @@
 """
-main.py - Test DataFetcher with Angel One
+main.py - Test DataFetcher
 """
 
 import warnings
@@ -9,13 +9,13 @@ import sys
 import os
 import pyotp
 import pandas as pd
-from src.data_fetcher import AngelDataFetcher
+from data_fetcher import AngelDataFetcher
 
 print("=" * 60)
 print("📊 DATA FETCHER TEST")
 print("=" * 60)
 
-# ========== IMPORTS ==========
+# ========== SMARTAPI ==========
 try:
     from SmartApi import SmartConnect
     print("✅ SmartApi imported!")
@@ -39,11 +39,10 @@ if not all([API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET]):
     print("❌ Missing credentials")
     sys.exit(1)
 
-# ========== GENERATE TOTP ==========
+# ========== TOTP & LOGIN ==========
 totp = pyotp.TOTP(TOTP_SECRET).now()
 print(f"\n🔄 TOTP: {totp}")
 
-# ========== LOGIN ==========
 print("\n🔄 Logging in...")
 obj = SmartConnect(api_key=API_KEY)
 response = obj.generateSession(
@@ -63,14 +62,12 @@ print("\n📊 Fetching historical data...")
 
 fetcher = AngelDataFetcher(obj)
 
-# Test symbols
 symbols = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS"]
 
 print(f"\n  Fetching {len(symbols)} symbols:")
 for sym in symbols:
     print(f"    - {sym}")
 
-# Fetch close prices
 close_data = fetcher.fetch_close_prices(symbols, interval="ONE_MINUTE", days=3)
 
 print(f"\n✅ Data fetched: {len(close_data)} rows, {len(close_data.columns)} columns")
@@ -80,7 +77,6 @@ if not close_data.empty:
     print("\n📊 Sample data (first 5 rows):")
     print(close_data.head())
     
-    # Save to CSV
     close_data.to_csv('close_prices.csv')
     print("\n📁 Saved to 'close_prices.csv'")
 else:
