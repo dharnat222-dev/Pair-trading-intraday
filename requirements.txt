@@ -1,1 +1,10 @@
-a
+smartapi-python
+pandas
+numpy
+scipy
+statsmodels
+scikit-learn
+ta
+websocket-client
+requests
+openpyxl
