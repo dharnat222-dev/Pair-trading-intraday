@@ -1,6 +1,5 @@
 """
-instrument.py - Instrument Manager with Cache-First Strategy
-No emergency tokens - fails gracefully if download fails
+instrument.py - Instrument Manager with Raw Data Storage
 """
 
 import json
@@ -15,17 +14,16 @@ class InstrumentManager:
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
         self.cache_file = "token_cache.json"
+        self._raw_data = []  # Store raw instrument data
     
     def load_master_contract(self) -> bool:
         """
         Load instruments with cache-first strategy
         """
-        # Step 1: Try to load from cache
         if self.load_cache():
             print("✅ Using cached instruments")
             return True
         
-        # Step 2: Try to download from primary URL
         urls = [
             "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
             "https://margincalculator.angelbroking.com/OpenAPI_ScripMaster.json"
@@ -37,15 +35,7 @@ class InstrumentManager:
                 self.save_cache()
                 return True
         
-        # Step 3: If all fails, EXIT with clear message
-        print("\n" + "=" * 60)
-        print("❌ CRITICAL: Scrip Master Download Failed")
-        print("   Cannot proceed without valid tokens.")
-        print("   Please check:")
-        print("   1. Internet connection")
-        print("   2. Angel One API access")
-        print("   3. URL: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json")
-        print("=" * 60)
+        print("\n❌ CRITICAL: Scrip Master Download Failed")
         return False
     
     def download_scrip_master(self, url: str) -> bool:
@@ -60,13 +50,15 @@ class InstrumentManager:
             if response.status_code != 200:
                 return False
             
-            # Check if response is JSON
             if 'application/json' not in response.headers.get('Content-Type', ''):
                 return False
             
             data = response.json()
             if not data:
                 return False
+            
+            # Store raw data for filtering
+            self._raw_data = data
             
             # Build token maps
             self.token_map = {}
@@ -120,7 +112,6 @@ class InstrumentManager:
             return False
     
     def get_token(self, symbol: str) -> Optional[str]:
-        """Get token for a symbol"""
         if not self._loaded:
             print("⚠️ Instruments not loaded")
             return None
