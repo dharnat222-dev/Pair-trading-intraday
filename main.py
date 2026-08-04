@@ -1,5 +1,5 @@
 """
-main.py - Pair Trading Scanner with Pair Engine
+main.py - Pair Trading Scanner V2
 """
 
 import warnings
@@ -11,10 +11,10 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
-from pair_engine import PairEngine
+from pair_engine_v2 import PairEngineV2
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER")
+print("📊 PAIR TRADING SCANNER V2")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -69,22 +69,30 @@ if close_data.empty:
     sys.exit(1)
 
 print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
-close_data.to_csv('close_prices.csv', index=True)
-print("📁 Saved to close_prices.csv")
 
-# ========== PAIR ENGINE ==========
+# ========== PAIR ENGINE V2 ==========
 print("\n" + "=" * 60)
-print("🔧 RUNNING PAIR ENGINE")
+print("🔧 RUNNING PAIR ENGINE V2")
 print("=" * 60)
 
-engine = PairEngine(close_data)
-results = engine.scan_pairs(corr_threshold=0.6, pval_threshold=0.10)
+engine = PairEngineV2(close_data)
+results = engine.scan_pairs(filters={
+    'same_sector': False,  # Disable for now (no sector data)
+    'min_correlation': 0.7,
+    'max_coint_pval': 0.05,
+    'max_adf_pval': 0.05,
+    'max_hurst': 0.5,
+    'max_half_life': 50,
+    'min_beta': 0.5,
+    'max_beta': 2.0
+})
+
 engine.display_results(n=10)
 
 if results:
     df_results = pd.DataFrame(results)
-    df_results.to_csv('pairs_results.csv', index=False)
-    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results.csv'")
+    df_results.to_csv('pairs_results_v2.csv', index=False)
+    print(f"\n📁 Saved to 'pairs_results_v2.csv'")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
