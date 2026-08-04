@@ -1,5 +1,5 @@
 """
-Pair Trading Scanner - SmartAPI Login (NO TOTP)
+Pair Trading Scanner - Login with TOTP Secret
 """
 
 import warnings
@@ -7,10 +7,10 @@ warnings.filterwarnings("ignore")
 
 import sys
 import os
-import json
+import pyotp
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER - LOGIN (NO TOTP)")
+print("📊 PAIR TRADING SCANNER - LOGIN (TOTP SECRET)")
 print("=" * 60)
 
 # ========== SMARTAPI IMPORT ==========
@@ -25,36 +25,63 @@ except ImportError as e:
 API_KEY = os.getenv("ANGEL_API_KEY")
 CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
 PASSWORD = os.getenv("ANGEL_PASSWORD")
-# TOTP not needed
+TOTP_SECRET = os.getenv("ANGEL_TOTP")  # JBSWY3DPEHPK3PXP
 
-print(f"  API Key: {API_KEY[:8]}...")
-print(f"  Client ID: {CLIENT_ID}")
+print("\n🔍 Checking GitHub Secrets:")
+print(f"  ANGEL_API_KEY: {API_KEY is not None}")
+print(f"  ANGEL_CLIENT_ID: {CLIENT_ID is not None}")
+print(f"  ANGEL_PASSWORD: {PASSWORD is not None}")
+print(f"  ANGEL_TOTP (Secret): {TOTP_SECRET is not None}")
 
-if not all([API_KEY, CLIENT_ID, PASSWORD]):
-    print("❌ Missing credentials")
+if not all([API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET]):
+    print("\n❌ Missing credentials. Check GitHub Secrets.")
+    sys.exit(1)
+
+# ========== GENERATE TOTP ==========
+try:
+    print("\n🔄 Generating TOTP from Secret...")
+    totp = pyotp.TOTP(TOTP_SECRET).now()
+    print(f"  ✅ Generated TOTP: {totp}")
+except Exception as e:
+    print(f"❌ TOTP Generation Failed: {e}")
     sys.exit(1)
 
 # ========== LOGIN ==========
-print("\n🔄 Logging in...")
+print("\n🔄 Logging in to Angel One...")
 try:
     obj = SmartConnect(api_key=API_KEY)
     response = obj.generateSession(
         clientCode=CLIENT_ID,
         password=PASSWORD,
-        totp=None  # No TOTP
+        totp=totp   # 6-digit OTP
     )
     
     if response and response.get('status') == True:
-        print("✅ Login Successful!")
+        print("\n✅ LOGIN SUCCESSFUL!")
         data = response.get('data', {})
         print(f"  Auth Token: {data.get('jwtToken', 'N/A')[:30]}...")
         print(f"  Refresh Token: {data.get('refreshToken', 'N/A')[:30]}...")
+        
+        # Get feed token
+        try:
+            feed_token = obj.getfeedToken()
+            print(f"  Feed Token: {feed_token[:30] if feed_token else 'N/A'}...")
+        except:
+            pass
+        
+        print("\n✅ Ready for Data Fetching!")
+        
     else:
-        print(f"❌ Login Failed: {response}")
+        print(f"\n❌ Login Failed: {response}")
+        print("\n  Possible reasons:")
+        print("  1. ❌ TOTP Secret is wrong or expired")
+        print("  2. ❌ Invalid Client ID")
+        print("  3. ❌ Wrong Password")
         sys.exit(1)
         
 except Exception as e:
-    print(f"❌ Login Exception: {e}")
+    print(f"\n❌ Login Exception: {e}")
     sys.exit(1)
 
-print("\n✅ Ready for Data Fetching!")
+print("\n" + "=" * 60)
+print("✅ Login Test Passed!")
