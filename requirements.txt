@@ -1,10 +1,11 @@
-smartapi-python
+smartapi-python==1.1.0
+yfinance
 pandas
 numpy
-scipy
 statsmodels
-scikit-learn
+scipy
 ta
 websocket-client
 requests
 openpyxl
+python-dotenv
