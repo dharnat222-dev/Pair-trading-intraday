@@ -5,15 +5,11 @@ data_fetcher.py - Historical OHLC Data Fetcher with Token Support
 import pandas as pd
 import datetime
 import time
+import json
 from typing import List, Optional, Dict, Any
 
 class AngelDataFetcher:
     def __init__(self, smartconnect_obj: Any, instrument_manager: Any):
-        """
-        Args:
-            smartconnect_obj: Logged-in SmartConnect instance
-            instrument_manager: InstrumentManager instance with token mapping
-        """
         self.obj = smartconnect_obj
         self.instrument = instrument_manager
         self.max_retries = 3
@@ -34,7 +30,14 @@ class AngelDataFetcher:
         
         for attempt in range(self.max_retries):
             try:
-                # 🔧 FIX: Use token in params dict
+                # 🔧 DEBUG: Print request parameters
+                print(f"\n📤 Request Debug for {symbol}:")
+                print(f"  Token: {token}")
+                print(f"  Interval: {interval}")
+                print(f"  From: {from_date}")
+                print(f"  To: {to_date}")
+                
+                # Method 1: Try with dictionary
                 params = {
                     "exchange": "NSE",
                     "symboltoken": token,
@@ -42,14 +45,22 @@ class AngelDataFetcher:
                     "fromdate": from_date,
                     "todate": to_date
                 }
+                print(f"  Params: {params}")
                 
                 resp = self.obj.getCandleData(params)
+                
+                print(f"  Response type: {type(resp)}")
+                print(f"  Response: {str(resp)[:200]}")
                 
                 if resp and resp.get('status') == True and resp.get('data'):
                     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
                     df = pd.DataFrame(resp['data'], columns=cols)
                     df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    print(f"✅ {symbol}: {len(df)} rows fetched")
                     return df
+                else:
+                    print(f"⚠️ {symbol}: Response status: {resp.get('status') if resp else 'None'}")
+                    print(f"  Message: {resp.get('message') if resp else 'No response'}")
                     
                 time.sleep(self.retry_delay)
                 
@@ -57,21 +68,24 @@ class AngelDataFetcher:
                 print(f"⚠️ {symbol} attempt {attempt+1}: {e}")
                 time.sleep(self.retry_delay)
         
+        print(f"❌ {symbol}: Failed after {self.max_retries} attempts")
         return None
     
     def fetch_multiple(self, symbols: List[str], interval: str = "ONE_MINUTE", days: int = 5) -> Dict[str, pd.DataFrame]:
+        """Fetch data for multiple symbols"""
         results = {}
         for symbol in symbols:
-            print(f"  Fetching {symbol}...")
+            print(f"\n📊 Fetching {symbol}...")
             df = self.fetch(symbol, interval, days)
             if df is not None:
                 results[symbol] = df
-                print(f"    ✅ {symbol}: {len(df)} rows")
+                print(f"  ✅ {symbol}: {len(df)} rows")
             else:
-                print(f"    ❌ {symbol}: No data")
+                print(f"  ❌ {symbol}: No data")
         return results
     
     def fetch_close_prices(self, symbols: List[str], interval: str = "ONE_MINUTE", days: int = 5) -> pd.DataFrame:
+        """Fetch and combine close prices for multiple symbols"""
         data_dict = self.fetch_multiple(symbols, interval, days)
         
         if not data_dict:
