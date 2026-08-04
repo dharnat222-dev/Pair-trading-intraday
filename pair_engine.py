@@ -1,18 +1,17 @@
 """
-pair_engine.py - Pair Engine V4 with Debug Prints
+pair_engine.py - Pair Engine V5 (Intraday Optimized)
+No Half-life/ADF hard filters. Uses Rolling Correlation, Z-Score, ATR.
 """
 
 import pandas as pd
 import numpy as np
 from itertools import combinations
-from statsmodels.tsa.stattools import coint, adfuller
 import warnings
 warnings.filterwarnings("ignore")
 
-class PairEngineV4:
-    def __init__(self, data: pd.DataFrame, sector_map: dict = None):
+class PairEngineV5:
+    def __init__(self, data: pd.DataFrame):
         self.data = data
-        self.sector_map = sector_map or {}
         self.results = []
         self.debug_log = []
         self._validate_data()
@@ -24,32 +23,39 @@ class PairEngineV4:
             raise ValueError("Need at least 2 stocks!")
         print(f"✅ Data: {len(self.data)} rows, {len(self.data.columns)} stocks")
     
-    def _get_sector(self, symbol: str) -> str:
-        clean_symbol = symbol.replace('.NS', '').replace('-EQ', '').strip()
-        return self.sector_map.get(clean_symbol, "Unknown")
+    def _calculate_rolling_corr(self, s1: str, s2: str, window: int = 20) -> pd.Series:
+        """Calculate rolling correlation between two stocks"""
+        clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
+        return clean[s1].rolling(window).corr(clean[s2])
     
-    def _calculate_hurst(self, ts: pd.Series) -> float:
-        ts = ts.values if isinstance(ts, pd.Series) else ts
-        lags = range(2, min(20, len(ts)//2))
-        if len(lags) < 2:
-            return 0.5
-        tau = [np.sqrt(np.std(np.subtract(ts[lag:], ts[:-lag]))) for lag in lags]
-        poly = np.polyfit(np.log(lags), np.log(tau), 1)
-        return poly[0] * 2.0
+    def _calculate_spread(self, s1: str, s2: str) -> pd.Series:
+        """Calculate spread (price difference)"""
+        clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
+        return clean[s2] - clean[s1]
     
-    def _calculate_half_life(self, spread: pd.Series) -> float:
-        spread_lag = spread[:-1]
-        spread_diff = spread[1:] - spread[:-1]
-        try:
-            theta = np.polyfit(spread_lag, spread_diff, 1)[0]
-            if theta < 0:
-                return -np.log(2) / theta
-            return 999
-        except:
-            return 999
+    def _calculate_zscore(self, spread: pd.Series, window: int = 20) -> pd.Series:
+        """Calculate rolling Z-Score"""
+        mean = spread.rolling(window).mean()
+        std = spread.rolling(window).std()
+        return (spread - mean) / std
+    
+    def _calculate_atr(self, s1: str, s2: str, window: int = 14) -> float:
+        """Calculate Average True Range for volatility"""
+        clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
+        
+        # Daily range for both stocks
+        high1 = clean[s1].max()
+        low1 = clean[s1].min()
+        high2 = clean[s2].max()
+        low2 = clean[s2].min()
+        
+        # Average spread volatility
+        spread = clean[s2] - clean[s1]
+        atr = spread.std()
+        return atr
     
     def analyze_pair(self, s1: str, s2: str) -> dict:
-        """Analyze a pair with all metrics"""
+        """Analyze a pair with intraday metrics"""
         result = {
             'pair': (s1, s2),
             'valid': False,
@@ -59,79 +65,65 @@ class PairEngineV4:
         }
         
         try:
+            # Clean data
             clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
-            if len(clean) < 20:
+            if len(clean) < 30:
                 result['reject_reason'].append(f"Insufficient data: {len(clean)} rows")
                 return result
             
-            # 1. Correlation
+            # 1. Static Correlation
             corr = clean[s1].corr(clean[s2])
             result['metrics']['correlation'] = round(corr, 4)
-            result['filters']['corr_pass'] = abs(corr) >= 0.5
+            result['filters']['corr_pass'] = abs(corr) >= 0.6
             if not result['filters']['corr_pass']:
-                result['reject_reason'].append(f"Corr={corr:.3f} < 0.5")
+                result['reject_reason'].append(f"Corr={corr:.3f} < 0.6")
             
-            # 2. Beta
-            beta = np.polyfit(clean[s1], clean[s2], 1)[0]
-            result['metrics']['beta'] = round(beta, 3)
-            result['filters']['beta_pass'] = 0.3 <= beta <= 3.0
-            if not result['filters']['beta_pass']:
-                result['reject_reason'].append(f"Beta={beta:.2f} outside [0.3, 3.0]")
+            # 2. Rolling Correlation (last 20 periods)
+            try:
+                rolling_corr = self._calculate_rolling_corr(s1, s2, window=20)
+                avg_rolling_corr = rolling_corr.mean() if not rolling_corr.empty else 0
+                result['metrics']['rolling_corr'] = round(avg_rolling_corr, 4)
+                result['filters']['rolling_corr_pass'] = abs(avg_rolling_corr) >= 0.5
+                if not result['filters']['rolling_corr_pass']:
+                    result['reject_reason'].append(f"Rolling Corr={avg_rolling_corr:.3f} < 0.5")
+            except:
+                result['filters']['rolling_corr_pass'] = True
+                result['metrics']['rolling_corr'] = corr
             
-            # 3. Cointegration
-            spread = clean[s2] - beta * clean[s1]
-            coint_score, coint_pval, _ = coint(clean[s1], clean[s2])
-            result['metrics']['coint_pval'] = round(coint_pval, 4)
-            result['filters']['coint_pass'] = coint_pval <= 0.10
-            if not result['filters']['coint_pass']:
-                result['reject_reason'].append(f"Coint p={coint_pval:.4f} > 0.10")
+            # 3. Spread & Z-Score
+            spread = self._calculate_spread(s1, s2)
+            zscore = self._calculate_zscore(spread, window=20)
+            current_z = zscore.iloc[-1] if not zscore.empty else 0
+            result['metrics']['zscore'] = round(current_z, 3)
+            result['filters']['zscore_pass'] = abs(current_z) >= 1.5
+            if not result['filters']['zscore_pass']:
+                result['reject_reason'].append(f"Z-Score={current_z:.2f} < 1.5")
             
-            # 4. ADF
-            adf_result = adfuller(spread, autolag='AIC')
-            adf_pval = adf_result[1]
-            result['metrics']['adf_pval'] = round(adf_pval, 4)
-            result['filters']['adf_pass'] = adf_pval <= 0.10
-            if not result['filters']['adf_pass']:
-                result['reject_reason'].append(f"ADF p={adf_pval:.4f} > 0.10")
+            # 4. Spread Volatility (ATR)
+            atr = self._calculate_atr(s1, s2, window=14)
+            result['metrics']['atr'] = round(atr, 2)
             
-            # 5. Hurst
-            h = self._calculate_hurst(spread)
-            result['metrics']['hurst'] = round(h, 3)
-            result['filters']['hurst_pass'] = h < 0.6
-            if not result['filters']['hurst_pass']:
-                result['reject_reason'].append(f"Hurst={h:.3f} >= 0.6")
+            # 5. Price Ratio (for normalization)
+            price_ratio = clean[s2].iloc[-1] / clean[s1].iloc[-1]
+            result['metrics']['price_ratio'] = round(price_ratio, 3)
             
-            # 6. Half-life
-            half_life = self._calculate_half_life(spread)
-            result['metrics']['half_life'] = round(half_life, 1)
-            result['filters']['half_life_pass'] = half_life < 100
-            if not result['filters']['half_life_pass']:
-                result['reject_reason'].append(f"Half-life={half_life:.1f} >= 100")
+            # 6. Signal
+            result['metrics']['signal'] = self._generate_signal(current_z)
             
-            # 7. Z-Score
-            zscore = (spread - spread.rolling(20).mean()) / spread.rolling(20).std()
-            result['metrics']['zscore'] = round(zscore.iloc[-1], 3) if not zscore.empty else 0
-            
-            # 8. Score
+            # 7. Score (0-100)
             score = 0
-            score += min(abs(corr) * 25, 25)
-            score += min((1 - min(coint_pval, 0.1) / 0.1) * 25, 25)
-            score += min((1 - min(adf_pval, 0.1) / 0.1) * 20, 20)
-            score += min((1 - min(h, 0.6) / 0.6) * 20, 20)
-            score += min((1 - min(half_life, 100) / 100) * 10, 10)
+            score += min(abs(corr) * 30, 30)  # Max 30
+            score += min(abs(result['metrics']['rolling_corr']) * 25, 25)  # Max 25
+            score += min(abs(current_z) * 15, 15)  # Max 15
+            score += min((1 - min(atr / 10, 1)) * 15, 15)  # Max 15
+            score += min((1 - abs(current_z - 2) / 4) * 15, 15)  # Max 15
             result['metrics']['score'] = round(min(score, 100), 1)
             
-            # 9. Signal
-            result['metrics']['signal'] = self._generate_signal(zscore.iloc[-1] if not zscore.empty else 0)
-            
-            # Final validation (all filters pass)
+            # Final validation (pass if correlation and zscore are good)
             result['valid'] = all([
                 result['filters']['corr_pass'],
-                result['filters']['beta_pass'],
-                result['filters']['coint_pass'],
-                result['filters']['adf_pass'],
-                result['filters']['hurst_pass'],
-                result['filters']['half_life_pass']
+                result['filters']['rolling_corr_pass'],
+                abs(current_z) >= 1.5  # Z-Score threshold
             ])
             
         except Exception as e:
@@ -152,15 +144,13 @@ class PairEngineV4:
             return "⚪ NO_SIGNAL"
     
     def scan_pairs(self, filters: dict = None) -> list:
-        """Scan all pairs with filters"""
+        """Scan all pairs with intraday filters"""
         filters = filters or {}
-        same_sector = filters.get('same_sector', False)  # Default False
-        min_corr = filters.get('min_correlation', 0.5)
-        max_pval = filters.get('max_pval', 0.10)
+        min_corr = filters.get('min_correlation', 0.6)
         
         symbols = list(self.data.columns)
         print(f"\n🔍 Scanning {len(symbols)} stocks...")
-        print(f"   Filters: Same Sector={same_sector}, Min Corr={min_corr}, Max Pval={max_pval}")
+        print(f"   Filters: Min Corr={min_corr}")
         
         results = []
         self.debug_log = []
@@ -170,21 +160,12 @@ class PairEngineV4:
         for s1, s2 in combinations(symbols, 2):
             checked += 1
             
-            # Sector filter (optional)
-            if same_sector:
-                sector1 = self._get_sector(s1)
-                sector2 = self._get_sector(s2)
-                if sector1 != sector2 or sector1 == "Unknown":
-                    continue
-            
-            # Analyze
             result = self.analyze_pair(s1, s2)
             self.debug_log.append(result)
             
             if result['valid']:
                 results.append(result)
             
-            # Progress update
             if checked % 50 == 0:
                 print(f"   Checked {checked}/{total_pairs} pairs...")
         
@@ -208,7 +189,6 @@ class PairEngineV4:
                 break
             s1, s2 = r['pair']
             
-            # Skip if no metrics (error)
             if not r['metrics']:
                 continue
             
@@ -219,15 +199,13 @@ class PairEngineV4:
             print(f"\n{count}. {s1:12} ↔ {s2:12} [{status}] Score: {score:.1f}")
             
             if r['reject_reason']:
-                for reason in r['reject_reason'][:3]:  # Show max 3 reasons
+                for reason in r['reject_reason'][:3]:
                     print(f"      ⛔ {reason}")
             else:
-                # Show metrics if passed
                 corr = r['metrics'].get('correlation', 0)
-                coint_p = r['metrics'].get('coint_pval', 1)
-                beta = r['metrics'].get('beta', 0)
                 z = r['metrics'].get('zscore', 0)
-                print(f"      📈 Corr: {corr:.3f} | 📉 Coint: {coint_p:.4f} | Beta: {beta:.2f} | Z: {z:.2f}")
+                atr = r['metrics'].get('atr', 0)
+                print(f"      📈 Corr: {corr:.3f} | 🎯 Z: {z:.2f} | 📊 ATR: {atr:.2f}")
     
     def display_results(self, n: int = 10):
         """Display formatted results"""
@@ -243,9 +221,9 @@ class PairEngineV4:
             s1, s2 = r['pair']
             m = r['metrics']
             print(f"\n{i}. {s1:12} ↔ {s2:12} | Score: {m['score']:.1f} | {m['signal']}")
-            print(f"   📈 Corr: {m['correlation']:.3f} | 📉 Coint: {m['coint_pval']:.4f}")
-            print(f"   📊 Beta: {m['beta']:.3f} | 🌀 Hurst: {m['hurst']:.3f}")
-            print(f"   ⏱️  Half-life: {m['half_life']:.1f} min | 🎯 Z: {m['zscore']:.3f}")
+            print(f"   📈 Corr: {m['correlation']:.3f} | 🌀 Rolling Corr: {m['rolling_corr']:.3f}")
+            print(f"   🎯 Z-Score: {m['zscore']:.3f} | 📊 ATR: {m['atr']:.2f}")
+            print(f"   📊 Price Ratio: {m['price_ratio']:.3f}")
         
         print("\n" + "=" * 80)
         print(f"✅ Total pairs found: {len(self.results)}")
