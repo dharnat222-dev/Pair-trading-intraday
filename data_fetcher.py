@@ -19,9 +19,9 @@ class AngelDataFetcher:
         
         for attempt in range(self.max_retries):
             try:
-                # 🔧 FIX: Removed 'exchange' parameter
+                # 🔧 FIX: Use 'tradingsymbol' instead of 'symbol'
                 resp = self.obj.getCandleData(
-                    symbol=symbol,
+                    tradingsymbol=symbol,
                     interval=interval,
                     fromdate=from_date,
                     todate=to_date
