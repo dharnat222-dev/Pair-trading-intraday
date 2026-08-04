@@ -1,10 +1,10 @@
 """
-instrument.py - Master Contract Manager for Angel One
+instrument.py - Master Contract Manager with Debug
 """
 
 import json
 import requests
-import pandas as pd
+import os
 from typing import Optional, Dict
 
 class InstrumentManager:
@@ -13,6 +13,7 @@ class InstrumentManager:
         self.token_map: Dict[str, str] = {}
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
+        self.exchange = "NSE"
     
     def load_master_contract(self) -> bool:
         """
@@ -21,48 +22,80 @@ class InstrumentManager:
         try:
             print("📥 Downloading master contract...")
             
-            # SmartAPI v2 uses REST endpoint for master contract
+            # 🔧 Get access token from SmartConnect object
+            access_token = ""
+            private_key = ""
+            
+            if hasattr(self.obj, 'access_token'):
+                access_token = self.obj.access_token
+            if hasattr(self.obj, 'privateKey'):
+                private_key = self.obj.privateKey
+            
+            print(f"  Access Token: {access_token[:20] if access_token else 'None'}...")
+            print(f"  Private Key: {private_key[:10] if private_key else 'None'}...")
+            
+            # SmartAPI v2 Master Contract URL
             url = "https://apiconnect.angelone.in/rest/secure/angelbroking/contract/v1/getMasterContract"
             
-            # Headers for API call
             headers = {
                 "X-UserType": "USER",
                 "X-SourceID": "WEB",
                 "X-ClientLocalIP": "127.0.0.1",
                 "X-ClientPublicIP": "127.0.0.1",
                 "X-MACAddress": "00:00:00:00:00:00",
-                "X-PrivateKey": self.obj.privateKey if hasattr(self.obj, 'privateKey') else "",
-                "X-AccessToken": self.obj.access_token if hasattr(self.obj, 'access_token') else "",
-                "Accept": "application/json"
+                "X-PrivateKey": private_key,
+                "X-AccessToken": access_token,
+                "Accept": "application/json",
+                "Content-Type": "application/json"
             }
             
-            params = {
-                "segment": "NSE",
+            payload = {
+                "segment": self.exchange,
                 "status": "ACTIVE"
             }
             
-            response = requests.post(url, headers=headers, json=params)
+            print(f"\n🔍 Debug Info:")
+            print(f"  URL: {url}")
+            print(f"  Headers: X-PrivateKey: {private_key[:10] if private_key else 'None'}...")
+            print(f"  Payload: {payload}")
             
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == True and data.get('data'):
-                    self._build_maps(data['data'])
-                    self._loaded = True
-                    print(f"✅ Loaded {len(self.token_map)} symbols")
-                    return True
-                else:
-                    print(f"❌ API Error: {data}")
-                    return False
-            else:
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            
+            print(f"\n📥 Response Debug:")
+            print(f"  Status Code: {response.status_code}")
+            print(f"  Content-Type: {response.headers.get('Content-Type', 'Unknown')}")
+            print(f"  Content-Length: {len(response.text)}")
+            print(f"  First 500 chars: {response.text[:500]}")
+            
+            if response.status_code != 200:
                 print(f"❌ HTTP Error: {response.status_code}")
                 return False
+            
+            # Try to parse JSON
+            try:
+                data = response.json()
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON Parse Error: {e}")
+                print(f"  Response Text: {response.text[:200]}")
+                return False
+            
+            if data.get('status') == True and data.get('data'):
+                self._build_maps(data['data'])
+                self._loaded = True
+                print(f"✅ Loaded {len(self.token_map)} symbols")
+                return True
+            else:
+                print(f"❌ API Error: {data}")
+                return False
                 
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Request Exception: {e}")
+            return False
         except Exception as e:
             print(f"❌ Failed to load master contract: {e}")
             return False
     
     def _build_maps(self, master_data):
-        """Build token maps from master data"""
         self.token_map = {}
         self.symbol_map = {}
         
@@ -120,3 +153,8 @@ class InstrumentManager:
     
     def is_loaded(self) -> bool:
         return self._loaded
+
+
+# ========== TEST ==========
+if __name__ == "__main__":
+    print("Testing InstrumentManager...")
