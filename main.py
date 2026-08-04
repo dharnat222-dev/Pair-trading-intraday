@@ -1,5 +1,5 @@
 """
-main.py - Scanner V7 (Professional)
+main.py - Complete Pair Trading Scanner (Stage-1 + Stage-2)
 """
 
 import warnings
@@ -12,11 +12,12 @@ import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
 from pair_engine_v7 import PairEngineV7
+from live_entry_scanner import LiveEntryScanner
 from universe import StockUniverse
 from sector_map import SECTOR_MAP
 
 print("=" * 60)
-print("📊 PAIR SCANNER V7 (PROFESSIONAL)")
+print("📊 PAIR TRADING SCANNER (Stage-1 + Stage-2)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -67,19 +68,18 @@ liquid_stocks = universe.filter_liquid_stocks()
 print(f"   Total NSE stocks: {len(all_stocks)}")
 print(f"   Liquid stocks: {len(liquid_stocks)}")
 
-# ========== PAIR SELECTION ==========
+# ========== STAGE-1: PAIR SELECTION ==========
 print("\n" + "=" * 60)
 print("📊 STAGE 1: PAIR SELECTION (Daily Data)")
 print("=" * 60)
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-# Fetch daily data - 180 days minimum
 print(f"\n📊 Fetching daily data for {len(liquid_stocks)} stocks...")
 close_data_daily = fetcher.fetch_close_prices(
     liquid_stocks, 
     interval="ONE_DAY", 
-    days=180  # Increased from 30 to 180
+    days=250  # 1 year of data
 )
 
 if close_data_daily.empty:
@@ -88,15 +88,15 @@ if close_data_daily.empty:
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
-# Run Pair Engine V7 with Sector Map
+# Run Pair Engine
 engine = PairEngineV7(close_data_daily, SECTOR_MAP)
 results = engine.scan_pairs()
 
 engine.display_debug_report(n=20)
-engine.display_results(n=30)
+engine.display_results(n=20)
 
 # Save top pairs
-top_pairs = engine.get_top_pairs(n=30)
+top_pairs = engine.get_top_pairs(n=20)
 df_pairs = pd.DataFrame([{
     'pair1': r['pair'][0],
     'pair2': r['pair'][1],
@@ -112,6 +112,27 @@ df_pairs = pd.DataFrame([{
 
 df_pairs.to_csv('selected_pairs_v7.csv', index=False)
 print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs_v7.csv'")
+
+# ========== STAGE-2: LIVE ENTRY SCANNER ==========
+print("\n" + "=" * 60)
+print("📊 STAGE 2: LIVE ENTRY SCANNER (5-min Z-Score)")
+print("=" * 60)
+
+if top_pairs:
+    # Initialize live scanner
+    live_scanner = LiveEntryScanner(fetcher, instrument_mgr)
+    live_scanner.set_pairs(top_pairs)
+    
+    # Run single scan
+    print("\n🔄 Running entry scan...")
+    signals = live_scanner.scan_all_pairs(days=3)
+    live_scanner.display_signals(signals)
+    
+    # Ask for continuous scan
+    # Uncomment below for continuous scanning
+    # live_scanner.run_continuous_scan(interval_minutes=5, max_runs=5)
+else:
+    print("❌ No pairs selected for live monitoring")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
