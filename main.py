@@ -1,0 +1,1 @@
+print("Pair Trading Scanner")
