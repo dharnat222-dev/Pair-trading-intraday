@@ -1,6 +1,6 @@
 """
-pair_engine_v7.py - Professional Pair Selection Engine
-Beta + Half-life Functions Fixed
+pair_engine_v7.py - Professional Pair Selection Engine V7.2
+No sklearn dependency, Pure NumPy for Beta and Half-life
 """
 
 import pandas as pd
@@ -45,15 +45,14 @@ class PairEngineV7:
     
     def _calculate_beta(self, s1: str, s2: str, clean: pd.DataFrame) -> float:
         """
-        Calculate Beta (Hedge Ratio) using Linear Regression
-        Fixed: Returns 1.0 as fallback instead of 0.0
+        Calculate Beta using pure NumPy polyfit
+        No sklearn dependency
         """
         try:
-            # Ensure we have numeric data
             x = clean[s1].values.astype(float)
             y = clean[s2].values.astype(float)
             
-            # Remove any NaN or inf values
+            # Remove NaN/inf
             mask = np.isfinite(x) & np.isfinite(y)
             x = x[mask]
             y = y[mask]
@@ -61,32 +60,29 @@ class PairEngineV7:
             if len(x) < 10:
                 return 1.0
             
-            # Linear regression: y = beta * x + alpha
+            # NumPy polyfit: y = beta * x + alpha
             beta = np.polyfit(x, y, 1)[0]
             
-            # If beta is 0 or very small, use 1.0 as fallback
+            # If beta is 0 or very small, use 1.0
             if abs(beta) < 0.01:
                 return 1.0
                 
             return beta
         except Exception as e:
-            print(f"⚠️ Beta calculation error: {e}")
             return 1.0
     
     def _calculate_half_life(self, spread: pd.Series) -> float:
         """
-        Calculate Half-life of Mean Reversion
-        Fixed: Better error handling and fallback
+        Calculate Half-life using pure NumPy
+        No sklearn dependency
         """
         if len(spread) < 10:
-            return 50  # Default reasonable value
+            return 50
         
         try:
-            # Use difference and lag
             spread_lag = spread.shift(1).dropna().values
             spread_diff = spread.diff().dropna().values
             
-            # Align lengths
             min_len = min(len(spread_lag), len(spread_diff))
             if min_len < 5:
                 return 50
@@ -94,34 +90,24 @@ class PairEngineV7:
             spread_lag = spread_lag[:min_len]
             spread_diff = spread_diff[:min_len]
             
-            # Linear regression: spread_diff = theta * spread_lag + alpha
-            X = spread_lag.reshape(-1, 1)
-            y = spread_diff
+            # NumPy polyfit: spread_diff = theta * spread_lag + alpha
+            theta = np.polyfit(spread_lag, spread_diff, 1)[0]
             
-            from sklearn.linear_model import LinearRegression
-            model = LinearRegression()
-            model.fit(X, y)
-            theta = model.coef_[0]
-            
-            # If theta < 0, mean reversion exists
             if theta < 0:
                 half_life = -np.log(2) / theta
-                # Cap at reasonable values
                 if half_life > 500:
                     return 100
                 if half_life < 1:
                     return 1
                 return half_life
             else:
-                # No mean reversion detected, return default
                 return 50
                 
         except Exception as e:
-            print(f"⚠️ Half-life calculation error: {e}")
-            return 50  # Default fallback
+            return 50
     
     def analyze_pair(self, s1: str, s2: str) -> dict:
-        """Analyze a pair with full metrics and debug info"""
+        """Analyze a pair with full metrics"""
         result = {
             'pair': (s1, s2),
             'valid': False,
@@ -131,12 +117,13 @@ class PairEngineV7:
         }
         
         try:
+            # Clean data - ALIGN dates
             clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
             if len(clean) < 60:
                 result['reject_reason'].append(f"Insufficient data: {len(clean)} rows")
                 return result
             
-            # 1. Sector Filter (MANDATORY)
+            # 1. Sector Filter
             sector1 = self._get_sector(s1)
             sector2 = self._get_sector(s2)
             result['debug']['sector'] = f"{sector1} ↔ {sector2}"
@@ -146,7 +133,7 @@ class PairEngineV7:
                 return result
             result['debug']['sector_pass'] = "✅"
             
-            # 2. Correlation
+            # 2. Correlation (on aligned data)
             corr = clean[s1].corr(clean[s2])
             result['metrics']['correlation'] = round(corr, 4)
             result['debug']['corr'] = f"{corr:.3f}"
@@ -156,24 +143,24 @@ class PairEngineV7:
                 return result
             result['debug']['corr_pass'] = "✅"
             
-            # 3. Rolling Correlation (30-day)
-            rolling_corr = clean[s1].rolling(30).corr(clean[s2])
+            # 3. Rolling Correlation (60-day)
+            rolling_corr = clean[s1].rolling(60).corr(clean[s2])
             avg_rolling_corr = rolling_corr.mean() if not rolling_corr.empty else 0
             result['metrics']['rolling_corr'] = round(avg_rolling_corr, 4)
             result['debug']['rolling_corr'] = f"{avg_rolling_corr:.3f}"
             
-            if abs(avg_rolling_corr) < 0.45:
-                result['reject_reason'].append(f"Rolling Corr={avg_rolling_corr:.3f} < 0.45")
+            if abs(avg_rolling_corr) < 0.40:
+                result['reject_reason'].append(f"Rolling Corr={avg_rolling_corr:.3f} < 0.40")
                 return result
             result['debug']['rolling_corr_pass'] = "✅"
             
-            # 4. Beta (FIXED)
+            # 4. Beta (Pure NumPy)
             beta = self._calculate_beta(s1, s2, clean)
             result['metrics']['beta'] = round(beta, 3)
             result['debug']['beta'] = f"{beta:.2f}"
             
-            if not (0.5 <= beta <= 1.5):
-                result['reject_reason'].append(f"Beta={beta:.2f} outside [0.5, 1.5]")
+            if not (0.4 <= beta <= 2.0):
+                result['reject_reason'].append(f"Beta={beta:.2f} outside [0.4, 2.0]")
                 return result
             result['debug']['beta_pass'] = "✅"
             
@@ -181,25 +168,33 @@ class PairEngineV7:
             spread = clean[s2] - beta * clean[s1]
             
             # 6. Cointegration
-            coint_score, coint_pval, _ = coint(clean[s1], clean[s2])
-            result['metrics']['coint_pval'] = round(coint_pval, 4)
-            result['debug']['coint'] = f"{coint_pval:.4f}"
-            
-            if coint_pval > 0.10:
-                result['reject_reason'].append(f"Coint p={coint_pval:.4f} > 0.10")
+            try:
+                coint_score, coint_pval, _ = coint(clean[s1], clean[s2])
+                result['metrics']['coint_pval'] = round(coint_pval, 4)
+                result['debug']['coint'] = f"{coint_pval:.4f}"
+                
+                if coint_pval > 0.10:
+                    result['reject_reason'].append(f"Coint p={coint_pval:.4f} > 0.10")
+                    return result
+                result['debug']['coint_pass'] = "✅"
+            except Exception as e:
+                result['reject_reason'].append(f"Cointegration error: {e}")
                 return result
-            result['debug']['coint_pass'] = "✅"
             
             # 7. ADF
-            adf_result = adfuller(spread, autolag='AIC')
-            adf_pval = adf_result[1]
-            result['metrics']['adf_pval'] = round(adf_pval, 4)
-            result['debug']['adf'] = f"{adf_pval:.4f}"
-            
-            if adf_pval > 0.10:
-                result['reject_reason'].append(f"ADF p={adf_pval:.4f} > 0.10")
+            try:
+                adf_result = adfuller(spread, autolag='AIC')
+                adf_pval = adf_result[1]
+                result['metrics']['adf_pval'] = round(adf_pval, 4)
+                result['debug']['adf'] = f"{adf_pval:.4f}"
+                
+                if adf_pval > 0.10:
+                    result['reject_reason'].append(f"ADF p={adf_pval:.4f} > 0.10")
+                    return result
+                result['debug']['adf_pass'] = "✅"
+            except Exception as e:
+                result['reject_reason'].append(f"ADF error: {e}")
                 return result
-            result['debug']['adf_pass'] = "✅"
             
             # 8. Hurst
             h = self._calculate_hurst(spread)
@@ -211,7 +206,7 @@ class PairEngineV7:
                 return result
             result['debug']['hurst_pass'] = "✅"
             
-            # 9. Half-life (FIXED)
+            # 9. Half-life
             half_life = self._calculate_half_life(spread)
             result['metrics']['half_life'] = round(half_life, 1)
             result['debug']['half_life'] = f"{half_life:.1f}"
@@ -241,7 +236,7 @@ class PairEngineV7:
     def scan_pairs(self) -> list:
         symbols = list(self.data.columns)
         print(f"\n🔍 Scanning {len(symbols)} stocks for pair selection...")
-        print(f"   Filters: Same Sector, Corr≥0.55, Beta 0.5-1.5, Hurst<0.50")
+        print(f"   Filters: Same Sector, Corr≥0.55, Beta 0.4-2.0, Hurst<0.50")
         
         results = []
         self.debug_log = []
@@ -266,7 +261,6 @@ class PairEngineV7:
         return self.results[:n]
     
     def display_debug_report(self, n: int = 30):
-        """Full Debug with all metrics"""
         if not self.debug_log:
             print("No debug data available.")
             return
