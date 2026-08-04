@@ -1,5 +1,5 @@
 """
-main.py - Scanner V5 (Intraday Optimized)
+main.py - Scanner V6 (Professional)
 """
 
 import warnings
@@ -11,11 +11,11 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
-from pair_engine import PairEngineV5
+from pair_engine_v6 import PairEngineV6
 from universe import StockUniverse
 
 print("=" * 60)
-print("📊 PAIR SCANNER V5 (INTRADAY OPTIMIZED)")
+print("📊 PAIR SCANNER V6 (PROFESSIONAL)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -66,51 +66,49 @@ liquid_stocks = universe.filter_liquid_stocks()
 print(f"   Total NSE stocks: {len(all_stocks)}")
 print(f"   Liquid stocks: {len(liquid_stocks)}")
 
-# ========== FETCH DATA ==========
-print("\n📊 Fetching historical data...")
-
-test_symbols = liquid_stocks[:20]
-print(f"   Fetching {len(test_symbols)} stocks...")
-
-fetcher = AngelDataFetcher(obj, instrument_mgr)
-close_data = fetcher.fetch_close_prices(test_symbols, interval="ONE_MINUTE", days=5)
-
-if close_data.empty:
-    print("❌ No data fetched. Exiting.")
-    sys.exit(1)
-
-print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
-
-# ========== PAIR ENGINE V5 ==========
+# ========== PAIR SELECTION ==========
 print("\n" + "=" * 60)
-print("🔧 RUNNING PAIR ENGINE V5 (INTRADAY)")
+print("📊 STAGE 1: PAIR SELECTION (Daily Data)")
 print("=" * 60)
 
-engine = PairEngineV5(close_data)
+fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-results = engine.scan_pairs(filters={
-    'min_correlation': 0.6
-})
+# Fetch daily data for all liquid stocks
+print(f"\n📊 Fetching daily data for {len(liquid_stocks)} stocks...")
+close_data_daily = fetcher.fetch_close_prices(
+    liquid_stocks, 
+    interval="ONE_DAY", 
+    days=30
+)
+
+if close_data_daily.empty:
+    print("❌ No daily data fetched. Exiting.")
+    sys.exit(1)
+
+print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
+
+# Run Pair Engine
+engine = PairEngineV6(close_data_daily)
+results = engine.scan_pairs()
 
 engine.display_debug_report(n=20)
-engine.display_results(n=10)
+engine.display_results(n=30)
 
-# ========== SAVE ==========
-if results:
-    df_results = pd.DataFrame([{
-        'pair1': r['pair'][0],
-        'pair2': r['pair'][1],
-        'correlation': r['metrics']['correlation'],
-        'rolling_corr': r['metrics']['rolling_corr'],
-        'zscore': r['metrics']['zscore'],
-        'atr': r['metrics']['atr'],
-        'price_ratio': r['metrics']['price_ratio'],
-        'score': r['metrics']['score'],
-        'signal': r['metrics']['signal']
-    } for r in results])
-    
-    df_results.to_csv('pairs_results_v5.csv', index=False)
-    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results_v5.csv'")
+# Save top pairs
+top_pairs = engine.get_top_pairs(n=50)
+df_pairs = pd.DataFrame([{
+    'pair1': r['pair'][0],
+    'pair2': r['pair'][1],
+    'correlation': r['metrics']['correlation'],
+    'coint_pval': r['metrics']['coint_pval'],
+    'beta': r['metrics']['beta'],
+    'hurst': r['metrics']['hurst'],
+    'half_life': r['metrics']['half_life'],
+    'score': r['metrics']['score']
+} for r in top_pairs])
+
+df_pairs.to_csv('selected_pairs.csv', index=False)
+print(f"\n📁 Saved {len(top_pairs)} selected pairs to 'selected_pairs.csv'")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
