@@ -1,10 +1,11 @@
 """
-instrument.py - Master Contract Manager with Fixed Headers
+instrument.py - Scrip Master Download from Angel One
 """
 
 import json
 import requests
 import os
+import gzip
 from typing import Optional, Dict
 
 class InstrumentManager:
@@ -13,106 +14,112 @@ class InstrumentManager:
         self.token_map: Dict[str, str] = {}
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
-        self.exchange = "NSE"
     
-    def load_master_contract(self) -> bool:
+    def download_scrip_master(self) -> bool:
         """
-        Download master contract using REST API
+        Download Scrip Master JSON from Angel One
         """
         try:
-            print("📥 Downloading master contract...")
+            print("📥 Downloading Scrip Master...")
             
-            # 🔧 Get tokens from SmartConnect
-            access_token = ""
-            private_key = ""
+            # Scrip Master URL (Angel One Open API)
+            url = "https://margincalculator.angelbroking.com/OpenAPI_ScripMaster.json"
             
-            if hasattr(self.obj, 'access_token'):
-                access_token = self.obj.access_token
-            if hasattr(self.obj, 'privateKey'):
-                private_key = self.obj.privateKey
-            elif hasattr(self.obj, 'api_key'):
-                private_key = self.obj.api_key
+            response = requests.get(url, timeout=30)
             
-            print(f"  Access Token: {access_token[:20] if access_token else 'None'}...")
-            print(f"  Private Key: {private_key[:10] if private_key else 'None'}...")
-            
-            url = "https://apiconnect.angelone.in/rest/secure/angelbroking/contract/v1/getMasterContract"
-            
-            # 🔧 FIX: Headers format for SmartAPI v2
-            headers = {
-                "Accept": "application/json",
-                "X-UserType": "USER",
-                "X-SourceID": "WEB",
-                "X-ClientLocalIP": "127.0.0.1",
-                "X-ClientPublicIP": "127.0.0.1",
-                "X-MACAddress": "00:00:00:00:00:00",
-                "X-ClientCode": self.obj.client_code if hasattr(self.obj, 'client_code') else "",
-                "X-PrivateKey": private_key,
-                "Authorization": f"Bearer {access_token}"
-            }
-            
-            payload = {
-                "segment": self.exchange,
-                "status": "ACTIVE"
-            }
-            
-            print(f"\n🔍 Debug Info:")
-            print(f"  URL: {url}")
-            print(f"  Headers Authorization: Bearer {access_token[:20] if access_token else 'None'}...")
-            print(f"  Payload: {payload}")
-            
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            
-            print(f"\n📥 Response Debug:")
-            print(f"  Status Code: {response.status_code}")
+            print(f"  Status: {response.status_code}")
             print(f"  Content-Type: {response.headers.get('Content-Type', 'Unknown')}")
             print(f"  Content-Length: {len(response.text)}")
             
             if response.status_code != 200:
-                print(f"❌ HTTP Error: {response.status_code}")
-                print(f"  Response: {response.text[:500]}")
+                print(f"❌ Download failed: {response.status_code}")
                 return False
             
-            # Try to parse JSON
+            # Parse JSON
             try:
                 data = response.json()
             except json.JSONDecodeError as e:
                 print(f"❌ JSON Parse Error: {e}")
-                print(f"  Response Text: {response.text[:200]}")
                 return False
             
-            if data.get('status') == True and data.get('data'):
-                self._build_maps(data['data'])
-                self._loaded = True
-                print(f"✅ Loaded {len(self.token_map)} symbols")
-                return True
-            else:
-                print(f"❌ API Error: {data}")
+            if not data:
+                print("❌ No data received")
                 return False
+            
+            print(f"✅ Downloaded {len(data)} instruments")
+            
+            # Build token maps
+            self.token_map = {}
+            self.symbol_map = {}
+            
+            for item in data:
+                symbol = item.get('symbol', '').upper()
+                token = item.get('token', '')
+                exchange = item.get('exch_seg', '')
                 
+                if symbol and token and exchange in ['NSE', 'NSEFO']:
+                    # Store with multiple formats
+                    self.token_map[symbol] = token
+                    self.token_map[f"{symbol}.NS"] = token
+                    self.symbol_map[token] = symbol
+            
+            self._loaded = True
+            print(f"✅ Loaded {len(self.token_map)} symbols")
+            return True
+            
         except requests.exceptions.RequestException as e:
             print(f"❌ Request Exception: {e}")
             return False
         except Exception as e:
-            print(f"❌ Failed to load master contract: {e}")
+            print(f"❌ Error: {e}")
             return False
     
-    def _build_maps(self, master_data):
-        self.token_map = {}
-        self.symbol_map = {}
+    def load_cache(self, filepath: str = "token_cache.json") -> bool:
+        """Load token map from cache"""
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                    self.token_map = data.get('token_map', {})
+                    self.symbol_map = data.get('symbol_map', {})
+                    self._loaded = True
+                    print(f"✅ Cache loaded: {len(self.token_map)} symbols")
+                    return True
+        except:
+            pass
+        return False
+    
+    def save_cache(self, filepath: str = "token_cache.json") -> bool:
+        """Save token map to cache"""
+        try:
+            with open(filepath, 'w') as f:
+                json.dump({
+                    'token_map': self.token_map,
+                    'symbol_map': self.symbol_map
+                }, f)
+            print(f"✅ Cache saved: {len(self.token_map)} symbols")
+            return True
+        except Exception as e:
+            print(f"⚠️ Could not save cache: {e}")
+            return False
+    
+    def load_master_contract(self) -> bool:
+        """Main method to load instruments"""
+        # First try cache
+        if self.load_cache():
+            return True
         
-        for item in master_data:
-            symbol = item.get('symbolname', '').upper()
-            token = item.get('symboltoken', '')
-            if symbol and token:
-                self.token_map[symbol] = token
-                self.symbol_map[token] = symbol
-            # Also store with .NS suffix for compatibility
-            self.token_map[f"{symbol}.NS"] = token
+        # Then download from web
+        if self.download_scrip_master():
+            self.save_cache()
+            return True
+        
+        return False
     
     def get_token(self, symbol: str) -> Optional[str]:
+        """Get token for a symbol"""
         if not self._loaded:
-            print("⚠️ Master contract not loaded.")
+            print("⚠️ Instruments not loaded")
             return None
         
         symbol_upper = symbol.upper()
@@ -121,34 +128,18 @@ class InstrumentManager:
         if token:
             return token
         
-        print(f"⚠️ Token not found for symbol: {symbol}")
+        # Try without .NS suffix
+        if symbol_upper.endswith('.NS'):
+            token = self.token_map.get(symbol_upper[:-3])
+            if token:
+                return token
+        
+        print(f"⚠️ Token not found: {symbol}")
         return None
     
     def get_symbol(self, token: str) -> Optional[str]:
+        """Get symbol for a token"""
         return self.symbol_map.get(token)
-    
-    def save_cache(self, filepath: str = "token_cache.json"):
-        try:
-            with open(filepath, 'w') as f:
-                json.dump({
-                    'token_map': self.token_map,
-                    'symbol_map': self.symbol_map
-                }, f)
-            print(f"✅ Token cache saved to {filepath}")
-        except Exception as e:
-            print(f"⚠️ Could not save cache: {e}")
-    
-    def load_cache(self, filepath: str = "token_cache.json") -> bool:
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-                self.token_map = data.get('token_map', {})
-                self.symbol_map = data.get('symbol_map', {})
-                self._loaded = True
-                print(f"✅ Token cache loaded ({len(self.token_map)} symbols)")
-                return True
-        except:
-            return False
     
     def is_loaded(self) -> bool:
         return self._loaded
