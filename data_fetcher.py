@@ -1,25 +1,17 @@
 """
-data_fetcher.py - Historical OHLC Data Fetcher from Angel One
+data_fetcher.py - Historical OHLC Data Fetcher
 """
 
 import pandas as pd
 import datetime
 import time
-import logging
 from typing import List, Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
-
 class AngelDataFetcher:
-    """Fetch historical OHLC data from Angel One API"""
-    
     def __init__(self, smartconnect_obj: Any):
         self.obj = smartconnect_obj
-        self.default_interval = "ONE_MINUTE"
-        self.default_days = 5
         self.max_retries = 3
         self.retry_delay = 1
-        self.exchange = "NSE"
     
     def fetch(self, symbol: str, interval: str = "ONE_MINUTE", days: int = 5) -> Optional[pd.DataFrame]:
         from_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
@@ -27,8 +19,8 @@ class AngelDataFetcher:
         
         for attempt in range(self.max_retries):
             try:
+                # 🔧 FIX: Removed 'exchange' parameter
                 resp = self.obj.getCandleData(
-                    exchange=self.exchange,
                     symbol=symbol,
                     interval=interval,
                     fromdate=from_date,
@@ -52,9 +44,13 @@ class AngelDataFetcher:
     def fetch_multiple(self, symbols: List[str], interval: str = "ONE_MINUTE", days: int = 5) -> Dict[str, pd.DataFrame]:
         results = {}
         for symbol in symbols:
+            print(f"  Fetching {symbol}...")
             df = self.fetch(symbol, interval, days)
             if df is not None:
                 results[symbol] = df
+                print(f"    ✅ {symbol}: {len(df)} rows")
+            else:
+                print(f"    ❌ {symbol}: No data")
         return results
     
     def fetch_close_prices(self, symbols: List[str], interval: str = "ONE_MINUTE", days: int = 5) -> pd.DataFrame:
