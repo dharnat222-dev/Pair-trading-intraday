@@ -1,6 +1,5 @@
 """
-pair_engine.py - Advanced Pair Selection Engine V2
-Filters: Correlation, Cointegration, Beta, Half-life, Hurst, ADF
+pair_engine.py - Pair Engine V3 with Debug Report
 """
 
 import pandas as pd
@@ -10,14 +9,12 @@ from statsmodels.tsa.stattools import coint, adfuller
 import warnings
 warnings.filterwarnings("ignore")
 
-class PairEngineV2:
+class PairEngineV3:
     def __init__(self, data: pd.DataFrame, sector_map: dict = None):
-        """
-        Initialize with OHLC data and optional sector mapping
-        """
         self.data = data
         self.sector_map = sector_map or {}
         self.results = []
+        self.debug_log = []
         self._validate_data()
     
     def _validate_data(self):
@@ -28,18 +25,10 @@ class PairEngineV2:
         print(f"✅ Data: {len(self.data)} rows, {len(self.data.columns)} stocks")
     
     def _get_sector(self, symbol: str) -> str:
-        """Get sector for a symbol"""
-        clean_symbol = symbol.replace('.NS', '').strip()
+        clean_symbol = symbol.replace('.NS', '').replace('-EQ', '').strip()
         return self.sector_map.get(clean_symbol, "Unknown")
     
-    def _same_sector_filter(self, s1: str, s2: str) -> bool:
-        """Check if two stocks are in the same sector"""
-        sector1 = self._get_sector(s1)
-        sector2 = self._get_sector(s2)
-        return sector1 == sector2 and sector1 != "Unknown"
-    
     def _calculate_hurst(self, ts: pd.Series) -> float:
-        """Calculate Hurst Exponent"""
         ts = ts.values if isinstance(ts, pd.Series) else ts
         lags = range(2, min(20, len(ts)//2))
         if len(lags) < 2:
@@ -49,7 +38,6 @@ class PairEngineV2:
         return poly[0] * 2.0
     
     def _calculate_half_life(self, spread: pd.Series) -> float:
-        """Calculate half-life of mean reversion"""
         spread_lag = spread[:-1]
         spread_diff = spread[1:] - spread[:-1]
         try:
@@ -60,61 +48,89 @@ class PairEngineV2:
         except:
             return 999
     
-    def analyze_pair(self, s1: str, s2: str) -> dict:
-        """Analyze a pair with all metrics"""
-        result = {'pair': (s1, s2), 'valid': True, 'errors': []}
+    def analyze_pair(self, s1: str, s2: str, debug: bool = False) -> dict:
+        """Analyze a pair with detailed debug info"""
+        result = {
+            'pair': (s1, s2),
+            'valid': True,
+            'checks': {},
+            'errors': []
+        }
         
         try:
+            # Data check
             clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
             if len(clean) < 30:
                 result['valid'] = False
-                result['errors'].append("Insufficient data")
+                result['checks']['data'] = f"❌ Insufficient data: {len(clean)} rows (need 30+)"
                 return result
             
-            # 1. Correlation
+            # 1. Sector Check
+            sector1 = self._get_sector(s1)
+            sector2 = self._get_sector(s2)
+            same_sector = sector1 == sector2 and sector1 != "Unknown"
+            result['checks']['sector'] = f"{'✅' if same_sector else '❌'} {sector1} ↔ {sector2}"
+            
+            # 2. Correlation
             corr = clean[s1].corr(clean[s2])
+            result['checks']['correlation'] = f"{'✅' if abs(corr) >= 0.6 else '❌'} {corr:.3f} (need ≥ 0.6)"
             result['correlation'] = round(corr, 4)
             
-            # 2. Beta
+            # 3. Beta
             beta = np.polyfit(clean[s1], clean[s2], 1)[0]
+            result['checks']['beta'] = f"{'✅' if 0.3 <= beta <= 3.0 else '❌'} {beta:.3f} (need 0.3-3.0)"
             result['beta'] = round(beta, 3)
             
-            # 3. Spread
+            # 4. Spread
             spread = clean[s2] - beta * clean[s1]
-            result['spread_mean'] = round(spread.mean(), 2)
-            result['spread_std'] = round(spread.std(), 2)
             
-            # 4. Cointegration
+            # 5. Cointegration
             coint_score, coint_pval, _ = coint(clean[s1], clean[s2])
+            result['checks']['coint'] = f"{'✅' if coint_pval <= 0.10 else '❌'} p={coint_pval:.4f} (need ≤ 0.10)"
             result['coint_pval'] = round(coint_pval, 4)
             
-            # 5. ADF
+            # 6. ADF
             adf_result = adfuller(spread, autolag='AIC')
-            result['adf_pval'] = round(adf_result[1], 4)
+            adf_pval = adf_result[1]
+            result['checks']['adf'] = f"{'✅' if adf_pval <= 0.10 else '❌'} p={adf_pval:.4f} (need ≤ 0.10)"
+            result['adf_pval'] = round(adf_pval, 4)
             
-            # 6. Hurst
+            # 7. Hurst
             h = self._calculate_hurst(spread)
+            result['checks']['hurst'] = f"{'✅' if h < 0.5 else '❌'} {h:.3f} (need < 0.5)"
             result['hurst'] = round(h, 3)
             
-            # 7. Half-life
+            # 8. Half-life
             half_life = self._calculate_half_life(spread)
+            result['checks']['half_life'] = f"{'✅' if half_life < 100 else '❌'} {half_life:.1f} min (need < 100)"
             result['half_life'] = round(half_life, 1)
             
-            # 8. Z-Score (last 20 periods)
+            # 9. Z-Score
             zscore = (spread - spread.rolling(20).mean()) / spread.rolling(20).std()
             result['zscore'] = round(zscore.iloc[-1], 3) if not zscore.empty else 0
             
-            # 9. Quality Score
+            # 10. Quality Score
             score = 0
-            score += min(abs(corr) * 30, 30)
+            score += min(abs(corr) * 25, 25)
             score += min((1 - min(coint_pval, 0.1) / 0.1) * 25, 25)
-            score += min((1 - min(adf_result[1], 0.1) / 0.1) * 20, 20)
-            score += min((1 - min(h, 0.5) / 0.5) * 15, 15)
-            score += min((1 - min(half_life, 50) / 50) * 10, 10)
+            score += min((1 - min(adf_pval, 0.1) / 0.1) * 20, 20)
+            score += min((1 - min(h, 0.5) / 0.5) * 20, 20)
+            score += min((1 - min(half_life, 100) / 100) * 10, 10)
             result['score'] = round(min(score, 100), 1)
             
-            # 10. Signal
+            # 11. Signal
             result['signal'] = self._generate_signal(zscore.iloc[-1] if not zscore.empty else 0)
+            
+            # Final validation (for filters)
+            passed = all([
+                abs(corr) >= 0.6,
+                coint_pval <= 0.10,
+                adf_pval <= 0.10,
+                h < 0.5,
+                half_life < 100,
+                0.3 <= beta <= 3.0
+            ])
+            result['valid'] = passed
             
         except Exception as e:
             result['valid'] = False
@@ -123,7 +139,6 @@ class PairEngineV2:
         return result
     
     def _generate_signal(self, zscore: float) -> str:
-        """Generate signal based on Z-Score"""
         if zscore > 2.0:
             return "🟢 BUY_LEG1_SELL_LEG2"
         elif zscore < -2.0:
@@ -135,54 +150,67 @@ class PairEngineV2:
         else:
             return "⚪ NO_SIGNAL"
     
-    def scan_pairs(self, filters: dict = None) -> list:
-        """Scan all pairs with filters"""
+    def scan_pairs(self, filters: dict = None, debug: bool = True) -> list:
+        """Scan all pairs with filters and debug report"""
         filters = filters or {}
         same_sector = filters.get('same_sector', True)
-        min_corr = filters.get('min_correlation', 0.7)
-        max_coint_pval = filters.get('max_coint_pval', 0.05)
-        max_adf_pval = filters.get('max_adf_pval', 0.05)
-        max_hurst = filters.get('max_hurst', 0.5)
-        max_half_life = filters.get('max_half_life', 50)
-        min_beta = filters.get('min_beta', 0.5)
-        max_beta = filters.get('max_beta', 2.0)
         
         symbols = list(self.data.columns)
         print(f"\n🔍 Scanning {len(symbols)} stocks...")
-        print(f"   Filters: Same Sector={same_sector}, Min Corr={min_corr}")
         
         results = []
+        self.debug_log = []
+        
         for s1, s2 in combinations(symbols, 2):
-            if same_sector and not self._same_sector_filter(s1, s2):
-                continue
+            # Sector filter
+            if same_sector:
+                sector1 = self._get_sector(s1)
+                sector2 = self._get_sector(s2)
+                if sector1 != sector2 or sector1 == "Unknown":
+                    continue
             
-            result = self.analyze_pair(s1, s2)
-            if not result['valid']:
-                continue
+            # Analyze pair
+            result = self.analyze_pair(s1, s2, debug=debug)
+            self.debug_log.append(result)
             
-            if result.get('correlation', 0) < min_corr:
-                continue
-            if result.get('coint_pval', 1) > max_coint_pval:
-                continue
-            if result.get('adf_pval', 1) > max_adf_pval:
-                continue
-            if result.get('hurst', 1) > max_hurst:
-                continue
-            if result.get('half_life', 999) > max_half_life:
-                continue
-            if result.get('beta', 0) < min_beta or result.get('beta', 10) > max_beta:
-                continue
-            
-            results.append(result)
+            if result['valid']:
+                results.append(result)
         
         results.sort(key=lambda x: x['score'], reverse=True)
         self.results = results
         return results
     
+    def display_debug_report(self, n: int = 20):
+        """Display detailed debug report"""
+        if not self.debug_log:
+            print("No debug data available.")
+            return
+        
+        print("\n" + "=" * 80)
+        print("📋 DEBUG REPORT (First 20 pairs)")
+        print("=" * 80)
+        
+        count = 0
+        for r in self.debug_log:
+            if count >= n:
+                break
+            s1, s2 = r['pair']
+            
+            # Skip if both sectors are Unknown (no sector data)
+            if self._get_sector(s1) == "Unknown" and self._get_sector(s2) == "Unknown":
+                continue
+            
+            count += 1
+            status = "✅ PASS" if r['valid'] else "❌ FAIL"
+            print(f"\n{count}. {s1:12} ↔ {s2:12} [{status}] Score: {r.get('score', 0):.1f}")
+            
+            for check_name, check_value in r.get('checks', {}).items():
+                print(f"      {check_name}: {check_value}")
+    
     def display_results(self, n: int = 10):
         """Display formatted results"""
         if not self.results:
-            print("No results to display.")
+            print("\n❌ No pairs found. Check debug report for reasons.")
             return
         
         print("\n" + "=" * 80)
