@@ -1,5 +1,5 @@
 """
-instrument.py - Master Contract Manager with Debug
+instrument.py - Master Contract Manager with Fixed Headers
 """
 
 import json
@@ -22,7 +22,7 @@ class InstrumentManager:
         try:
             print("📥 Downloading master contract...")
             
-            # 🔧 Get access token from SmartConnect object
+            # 🔧 Get tokens from SmartConnect
             access_token = ""
             private_key = ""
             
@@ -30,23 +30,25 @@ class InstrumentManager:
                 access_token = self.obj.access_token
             if hasattr(self.obj, 'privateKey'):
                 private_key = self.obj.privateKey
+            elif hasattr(self.obj, 'api_key'):
+                private_key = self.obj.api_key
             
             print(f"  Access Token: {access_token[:20] if access_token else 'None'}...")
             print(f"  Private Key: {private_key[:10] if private_key else 'None'}...")
             
-            # SmartAPI v2 Master Contract URL
             url = "https://apiconnect.angelone.in/rest/secure/angelbroking/contract/v1/getMasterContract"
             
+            # 🔧 FIX: Headers format for SmartAPI v2
             headers = {
+                "Accept": "application/json",
                 "X-UserType": "USER",
                 "X-SourceID": "WEB",
                 "X-ClientLocalIP": "127.0.0.1",
                 "X-ClientPublicIP": "127.0.0.1",
                 "X-MACAddress": "00:00:00:00:00:00",
+                "X-ClientCode": self.obj.client_code if hasattr(self.obj, 'client_code') else "",
                 "X-PrivateKey": private_key,
-                "X-AccessToken": access_token,
-                "Accept": "application/json",
-                "Content-Type": "application/json"
+                "Authorization": f"Bearer {access_token}"
             }
             
             payload = {
@@ -56,7 +58,7 @@ class InstrumentManager:
             
             print(f"\n🔍 Debug Info:")
             print(f"  URL: {url}")
-            print(f"  Headers: X-PrivateKey: {private_key[:10] if private_key else 'None'}...")
+            print(f"  Headers Authorization: Bearer {access_token[:20] if access_token else 'None'}...")
             print(f"  Payload: {payload}")
             
             response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -65,10 +67,10 @@ class InstrumentManager:
             print(f"  Status Code: {response.status_code}")
             print(f"  Content-Type: {response.headers.get('Content-Type', 'Unknown')}")
             print(f"  Content-Length: {len(response.text)}")
-            print(f"  First 500 chars: {response.text[:500]}")
             
             if response.status_code != 200:
                 print(f"❌ HTTP Error: {response.status_code}")
+                print(f"  Response: {response.text[:500]}")
                 return False
             
             # Try to parse JSON
@@ -105,6 +107,8 @@ class InstrumentManager:
             if symbol and token:
                 self.token_map[symbol] = token
                 self.symbol_map[token] = symbol
+            # Also store with .NS suffix for compatibility
+            self.token_map[f"{symbol}.NS"] = token
     
     def get_token(self, symbol: str) -> Optional[str]:
         if not self._loaded:
@@ -116,11 +120,6 @@ class InstrumentManager:
         
         if token:
             return token
-        
-        if symbol_upper.endswith('.NS'):
-            token = self.token_map.get(symbol_upper[:-3])
-            if token:
-                return token
         
         print(f"⚠️ Token not found for symbol: {symbol}")
         return None
@@ -153,8 +152,3 @@ class InstrumentManager:
     
     def is_loaded(self) -> bool:
         return self._loaded
-
-
-# ========== TEST ==========
-if __name__ == "__main__":
-    print("Testing InstrumentManager...")
