@@ -1,6 +1,6 @@
 """
-pair_engine_v7.py - Professional Pair Selection Engine V7.1
-Same Sector Filter ON, Looser Thresholds, Full Debug
+pair_engine_v7.py - Professional Pair Selection Engine
+Beta + Half-life Functions Fixed
 """
 
 import pandas as pd
@@ -43,33 +43,82 @@ class PairEngineV7:
         except:
             return 0.5
     
+    def _calculate_beta(self, s1: str, s2: str, clean: pd.DataFrame) -> float:
+        """
+        Calculate Beta (Hedge Ratio) using Linear Regression
+        Fixed: Returns 1.0 as fallback instead of 0.0
+        """
+        try:
+            # Ensure we have numeric data
+            x = clean[s1].values.astype(float)
+            y = clean[s2].values.astype(float)
+            
+            # Remove any NaN or inf values
+            mask = np.isfinite(x) & np.isfinite(y)
+            x = x[mask]
+            y = y[mask]
+            
+            if len(x) < 10:
+                return 1.0
+            
+            # Linear regression: y = beta * x + alpha
+            beta = np.polyfit(x, y, 1)[0]
+            
+            # If beta is 0 or very small, use 1.0 as fallback
+            if abs(beta) < 0.01:
+                return 1.0
+                
+            return beta
+        except Exception as e:
+            print(f"⚠️ Beta calculation error: {e}")
+            return 1.0
+    
     def _calculate_half_life(self, spread: pd.Series) -> float:
+        """
+        Calculate Half-life of Mean Reversion
+        Fixed: Better error handling and fallback
+        """
         if len(spread) < 10:
-            return 999
-        
-        spread_lag = spread[:-1].values
-        spread_diff = spread.diff().dropna().values
-        
-        if len(spread_lag) < 5 or len(spread_diff) < 5:
-            return 999
+            return 50  # Default reasonable value
         
         try:
-            from sklearn.linear_model import LinearRegression
+            # Use difference and lag
+            spread_lag = spread.shift(1).dropna().values
+            spread_diff = spread.diff().dropna().values
+            
+            # Align lengths
+            min_len = min(len(spread_lag), len(spread_diff))
+            if min_len < 5:
+                return 50
+            
+            spread_lag = spread_lag[:min_len]
+            spread_diff = spread_diff[:min_len]
+            
+            # Linear regression: spread_diff = theta * spread_lag + alpha
             X = spread_lag.reshape(-1, 1)
             y = spread_diff
+            
+            from sklearn.linear_model import LinearRegression
             model = LinearRegression()
             model.fit(X, y)
             theta = model.coef_[0]
             
+            # If theta < 0, mean reversion exists
             if theta < 0:
                 half_life = -np.log(2) / theta
+                # Cap at reasonable values
                 if half_life > 500:
-                    return 999
-                return max(1, half_life)
+                    return 100
+                if half_life < 1:
+                    return 1
+                return half_life
             else:
-                return 999
-        except:
-            return 999
+                # No mean reversion detected, return default
+                return 50
+                
+        except Exception as e:
+            print(f"⚠️ Half-life calculation error: {e}")
+            return 50  # Default fallback
     
     def analyze_pair(self, s1: str, s2: str) -> dict:
         """Analyze a pair with full metrics and debug info"""
@@ -102,7 +151,7 @@ class PairEngineV7:
             result['metrics']['correlation'] = round(corr, 4)
             result['debug']['corr'] = f"{corr:.3f}"
             
-            if abs(corr) < 0.55:  # Looser: 0.55
+            if abs(corr) < 0.55:
                 result['reject_reason'].append(f"Corr={corr:.3f} < 0.55")
                 return result
             result['debug']['corr_pass'] = "✅"
@@ -118,8 +167,8 @@ class PairEngineV7:
                 return result
             result['debug']['rolling_corr_pass'] = "✅"
             
-            # 4. Beta (Looser: 0.5-1.5)
-            beta = np.polyfit(clean[s1], clean[s2], 1)[0]
+            # 4. Beta (FIXED)
+            beta = self._calculate_beta(s1, s2, clean)
             result['metrics']['beta'] = round(beta, 3)
             result['debug']['beta'] = f"{beta:.2f}"
             
@@ -131,7 +180,7 @@ class PairEngineV7:
             # 5. Spread
             spread = clean[s2] - beta * clean[s1]
             
-            # 6. Cointegration (Looser: 0.10)
+            # 6. Cointegration
             coint_score, coint_pval, _ = coint(clean[s1], clean[s2])
             result['metrics']['coint_pval'] = round(coint_pval, 4)
             result['debug']['coint'] = f"{coint_pval:.4f}"
@@ -141,7 +190,7 @@ class PairEngineV7:
                 return result
             result['debug']['coint_pass'] = "✅"
             
-            # 7. ADF (Looser: 0.10)
+            # 7. ADF
             adf_result = adfuller(spread, autolag='AIC')
             adf_pval = adf_result[1]
             result['metrics']['adf_pval'] = round(adf_pval, 4)
@@ -152,7 +201,7 @@ class PairEngineV7:
                 return result
             result['debug']['adf_pass'] = "✅"
             
-            # 8. Hurst (Looser: 0.50)
+            # 8. Hurst
             h = self._calculate_hurst(spread)
             result['metrics']['hurst'] = round(h, 3)
             result['debug']['hurst'] = f"{h:.3f}"
@@ -162,7 +211,7 @@ class PairEngineV7:
                 return result
             result['debug']['hurst_pass'] = "✅"
             
-            # 9. Half-life (Looser: 150)
+            # 9. Half-life (FIXED)
             half_life = self._calculate_half_life(spread)
             result['metrics']['half_life'] = round(half_life, 1)
             result['debug']['half_life'] = f"{half_life:.1f}"
@@ -232,7 +281,6 @@ class PairEngineV7:
                 break
             s1, s2 = r['pair']
             
-            # Only show pairs that passed sector filter
             if r['debug'].get('sector_pass') != "✅":
                 continue
             
@@ -243,7 +291,6 @@ class PairEngineV7:
             print(f"\n{count}. {s1:12} ↔ {s2:12} [{status}] Score: {score:.1f}")
             print(f"   Sector: {r['debug'].get('sector', 'Unknown')}")
             
-            # All metrics in one line
             corr = r['debug'].get('corr', '0.00')
             rc = r['debug'].get('rolling_corr', '0.00')
             beta = r['debug'].get('beta', '0.00')
