@@ -5,6 +5,7 @@ pandas
 numpy
 statsmodels
 scipy
+scikit-learn
 yfinance
 ta
 websocket-client
