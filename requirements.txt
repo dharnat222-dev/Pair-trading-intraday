@@ -1,4 +1,5 @@
 smartapi-python==1.1.0
+pyotp
 yfinance
 pandas
 numpy
