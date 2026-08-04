@@ -1,5 +1,5 @@
 """
-Pair Trading Scanner - Phase 1: SmartAPI Import Test
+Pair Trading Scanner - Phase 2: Real Login Test
 """
 
 import warnings
@@ -7,51 +7,86 @@ warnings.filterwarnings("ignore")
 
 import sys
 import os
+import time
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER - IMPORT TEST")
+print("📊 PAIR TRADING SCANNER - LOGIN TEST")
 print("=" * 60)
 print(f"Python: {sys.version}")
 
-# ========== TEST 1: SmartAPI Import ==========
-print("\n🔍 Testing SmartAPI Import...")
-
+# ========== SMARTAPI IMPORT ==========
+print("\n🔍 Importing SmartAPI...")
 try:
     from SmartApi import SmartConnect
     print("✅ SmartApi imported successfully!")
-    print(f"   Module: {SmartConnect}")
 except ImportError as e:
     print(f"❌ SmartApi import failed: {e}")
     sys.exit(1)
 
-# ========== TEST 2: Check Environment ==========
-print("\n🔍 Checking Environment Variables...")
-env_vars = ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP"]
-for var in env_vars:
-    value = os.getenv(var)
-    if value:
-        # Show only last 4 characters for security
-        print(f"  ✅ {var}: {'*' * 8}{value[-4:]}")
-    else:
-        print(f"  ❌ {var}: Not set")
+# ========== LOAD CREDENTIALS ==========
+API_KEY = os.getenv("ANGEL_API_KEY")
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
+PASSWORD = os.getenv("ANGEL_PASSWORD")
+TOTP = os.getenv("ANGEL_TOTP")
 
-# ========== TEST 3: Try Simple API Call ==========
-print("\n🔍 Testing Simple API Connection...")
+print("\n🔍 Checking Credentials...")
+if all([API_KEY, CLIENT_ID, PASSWORD, TOTP]):
+    print("  ✅ All credentials are set.")
+else:
+    print("  ❌ Some credentials are missing.")
+    sys.exit(1)
+
+# ========== REAL LOGIN TEST ==========
+print("\n🔄 Attempting Real Login to Angel One...")
+print(f"   API Key: {API_KEY[:10]}...")
+print(f"   Client ID: {CLIENT_ID}")
 
 try:
-    # Only if all environment variables are set
-    api_key = os.getenv("ANGEL_API_KEY")
-    client_id = os.getenv("ANGEL_CLIENT_ID")
-    password = os.getenv("ANGEL_PASSWORD")
-    totp = os.getenv("ANGEL_TOTP")
+    # Create SmartConnect object
+    obj = SmartConnect(api_key=API_KEY)
+    print("  ✅ SmartConnect object created")
     
-    if all([api_key, client_id, password, totp]):
-        print("  All credentials are set. Ready for login test.")
+    # Generate session
+    print("  ⏳ Generating session...")
+    response = obj.generateSession(
+        clientCode=CLIENT_ID,
+        password=PASSWORD,
+        totp=TOTP
+    )
+    
+    print(f"  📥 Response received: {type(response)}")
+    
+    if response and 'data' in response:
+        print("\n" + "=" * 60)
+        print("✅ LOGIN SUCCESSFUL!")
+        print("=" * 60)
+        
+        data = response['data']
+        auth_token = data.get('jwtToken', 'N/A')
+        refresh_token = data.get('refreshToken', 'N/A')
+        
+        print(f"  Auth Token: {auth_token[:30]}..." if auth_token != 'N/A' else "  Auth Token: N/A")
+        print(f"  Refresh Token: {refresh_token[:30]}..." if refresh_token != 'N/A' else "  Refresh Token: N/A")
+        
+        # Get feed token
+        try:
+            feed_token = obj.getfeedToken()
+            print(f"  Feed Token: {feed_token[:30]}..." if feed_token else "  Feed Token: N/A")
+        except:
+            print("  ⚠️ Could not get feed token")
+        
+        print("\n" + "=" * 60)
+        print("✅ Ready for next step: Historical Data Fetch")
+        print("=" * 60)
+        
     else:
-        print("  ⚠️ Some credentials missing. Skipping login test.")
+        print(f"\n❌ Login Failed: {response}")
+        
 except Exception as e:
-    print(f"  ❌ Error checking credentials: {e}")
-
-print("\n" + "=" * 60)
-print("✅ Import Test Passed! Ready for next step.")
-print("=" * 60)
+    print(f"\n❌ Login Exception: {e}")
+    print("   Possible reasons:")
+    print("   1. Invalid API Key")
+    print("   2. Wrong Client ID")
+    print("   3. Incorrect Password")
+    print("   4. TOTP expired")
+    sys.exit(1)
