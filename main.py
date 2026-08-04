@@ -1,5 +1,5 @@
 """
-main.py - Test with Scrip Master
+main.py - Pair Trading Scanner with Pair Engine
 """
 
 import warnings
@@ -11,18 +11,11 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
+from pair_engine import PairEngine
 
 print("=" * 60)
-print("📊 SCRIP MASTER + DATA FETCHER TEST")
+print("📊 PAIR TRADING SCANNER")
 print("=" * 60)
-
-# ========== SMARTAPI ==========
-try:
-    from SmartApi import SmartConnect
-    print("✅ SmartApi imported!")
-except ImportError as e:
-    print(f"❌ {e}")
-    sys.exit(1)
 
 # ========== CREDENTIALS ==========
 API_KEY = os.getenv("ANGEL_API_KEY")
@@ -35,6 +28,13 @@ if not all([API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET]):
     sys.exit(1)
 
 # ========== LOGIN ==========
+try:
+    from SmartApi import SmartConnect
+    print("✅ SmartApi imported!")
+except ImportError as e:
+    print(f"❌ {e}")
+    sys.exit(1)
+
 totp = pyotp.TOTP(TOTP_SECRET).now()
 print(f"\n🔄 TOTP: {totp}")
 
@@ -54,25 +54,37 @@ print("✅ Login Successful!")
 # ========== INSTRUMENTS ==========
 print("\n📥 Loading instruments...")
 instrument_mgr = InstrumentManager(obj)
-if not instrument_mgr.load_master_contract():
-    print("❌ Failed to load instruments")
-    sys.exit(1)
+instrument_mgr.load_master_contract()
 
 # ========== FETCH DATA ==========
 print("\n📊 Fetching historical data...")
 
-fetcher = AngelDataFetcher(obj, instrument_mgr)
+symbols = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "HINDUNILVR", "ITC"]
 
-symbols = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS"]
+fetcher = AngelDataFetcher(obj, instrument_mgr)
 close_data = fetcher.fetch_close_prices(symbols, interval="ONE_MINUTE", days=3)
 
-if not close_data.empty:
-    print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
-    print(close_data.head())
-    close_data.to_csv('close_prices.csv')
-    print("📁 Saved to close_prices.csv")
-else:
-    print("❌ No data")
+if close_data.empty:
+    print("❌ No data fetched. Exiting.")
+    sys.exit(1)
+
+print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
+close_data.to_csv('close_prices.csv', index=True)
+print("📁 Saved to close_prices.csv")
+
+# ========== PAIR ENGINE ==========
+print("\n" + "=" * 60)
+print("🔧 RUNNING PAIR ENGINE")
+print("=" * 60)
+
+engine = PairEngine(close_data)
+results = engine.scan_pairs(corr_threshold=0.6, pval_threshold=0.10)
+engine.display_results(n=10)
+
+if results:
+    df_results = pd.DataFrame(results)
+    df_results.to_csv('pairs_results.csv', index=False)
+    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results.csv'")
 
 print("\n" + "=" * 60)
-print("✅ Test Complete!")
+print("✅ Scanner Complete!")
