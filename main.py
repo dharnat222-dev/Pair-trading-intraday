@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner V3 with Debug
+main.py - Scanner V4 with Looser Filters
 """
 
 import warnings
@@ -11,11 +11,11 @@ import pyotp
 import pandas as pd
 from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
-from pair_engine import PairEngineV3
+from pair_engine import PairEngineV4
 from universe import StockUniverse
 
 print("=" * 60)
-print("📊 PAIR SCANNER V3 - DEBUG MODE")
+print("📊 PAIR SCANNER V4 (LOOSER FILTERS + DEBUG)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -81,29 +81,43 @@ if close_data.empty:
 
 print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
 
-# ========== PAIR ENGINE V3 ==========
+# ========== PAIR ENGINE V4 ==========
 print("\n" + "=" * 60)
-print("🔧 RUNNING PAIR ENGINE V3 (DEBUG MODE)")
+print("🔧 RUNNING PAIR ENGINE V4 (LOOSER FILTERS)")
 print("=" * 60)
 
-engine = PairEngineV3(close_data)
+engine = PairEngineV4(close_data)
 
-# Scan with sector filter disabled for now
+# Looser filters
 results = engine.scan_pairs(filters={
-    'same_sector': False  # Disable sector filter to find pairs
-}, debug=True)
+    'same_sector': False,      # Disable sector filter
+    'min_correlation': 0.5,    # Looser correlation
+    'max_pval': 0.10           # Same coint p-value
+})
 
 # Show debug report
 engine.display_debug_report(n=20)
 
-# Show results if any
+# Show results
 engine.display_results(n=10)
 
 # ========== SAVE ==========
 if results:
-    df_results = pd.DataFrame(results)
-    df_results.to_csv('pairs_results_v3.csv', index=False)
-    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results_v3.csv'")
+    df_results = pd.DataFrame([{
+        'pair1': r['pair'][0],
+        'pair2': r['pair'][1],
+        'correlation': r['metrics']['correlation'],
+        'coint_pval': r['metrics']['coint_pval'],
+        'beta': r['metrics']['beta'],
+        'hurst': r['metrics']['hurst'],
+        'half_life': r['metrics']['half_life'],
+        'zscore': r['metrics']['zscore'],
+        'score': r['metrics']['score'],
+        'signal': r['metrics']['signal']
+    } for r in results])
+    
+    df_results.to_csv('pairs_results_v4.csv', index=False)
+    print(f"\n📁 Saved {len(results)} pairs to 'pairs_results_v4.csv'")
 
 print("\n" + "=" * 60)
 print("✅ Scanner Complete!")
