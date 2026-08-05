@@ -13,6 +13,7 @@ class AngelDataFetcher:
         self.instrument = instrument_manager
         self.max_retries = 3
         self.retry_delay = 1
+        self.min_history_days = 150  # Minimum trading days required
     
     def fetch(self, symbol: str, interval: str = "ONE_MINUTE", days: int = 5) -> Optional[pd.DataFrame]:
         """Fetch historical OHLC data for a symbol"""
@@ -24,7 +25,6 @@ class AngelDataFetcher:
         from_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d 09:15")
         to_date = datetime.datetime.now().strftime("%Y-%m-%d 15:30")
         
-        # Weekend adjustment
         today = datetime.datetime.now()
         if today.weekday() >= 5:
             friday = today - datetime.timedelta(days=(today.weekday() - 4))
@@ -48,7 +48,6 @@ class AngelDataFetcher:
                     df = pd.DataFrame(resp['data'], columns=cols)
                     df['timestamp'] = pd.to_datetime(df['timestamp'])
                     
-                    # 🔍 DEBUG: Show data shape
                     print(f"  ✅ {symbol}: {len(df)} rows")
                     return df
                     
@@ -73,7 +72,7 @@ class AngelDataFetcher:
                 print(f"  ❌ {symbol}: No data")
         return results
     
-    def fetch_close_prices(self, symbols: List[str], interval: str = "ONE_MINUTE", days: int = 5) -> pd.DataFrame:
+    def fetch_close_prices(self, symbols: List[str], interval: str = "ONE_DAY", days: int = 250) -> pd.DataFrame:
         """
         Fetch and combine close prices for multiple symbols
         """
@@ -83,44 +82,37 @@ class AngelDataFetcher:
             print("❌ No data fetched for any symbol")
             return pd.DataFrame()
         
-        # 🔍 DEBUG: Show fetched data
-        print(f"\n🔍 Fetched {len(data_dict)} symbols")
-        for sym, df in data_dict.items():
-            print(f"  {sym}: {len(df)} rows, {df['timestamp'].min()} to {df['timestamp'].max()}")
+        # 🔍 Filter: Remove symbols with insufficient history
+        valid_data = {}
+        for symbol, df in data_dict.items():
+            if len(df) >= self.min_history_days:
+                valid_data[symbol] = df
+                print(f"  ✅ {symbol}: {len(df)} rows (kept)")
+            else:
+                print(f"  ❌ {symbol}: {len(df)} rows (skipped - need {self.min_history_days})")
+        
+        if not valid_data:
+            print(f"❌ No symbols have minimum {self.min_history_days} rows")
+            return pd.DataFrame()
         
         # Combine close prices
         close_data = pd.DataFrame()
-        for symbol, df in data_dict.items():
-            # Set timestamp as index and extract close
+        for symbol, df in valid_data.items():
             df_indexed = df.set_index('timestamp')
             close_data[symbol] = df_indexed['close']
         
-        # 🔍 DEBUG: Before dropna
         print(f"\n🔍 Before dropna: {len(close_data)} rows, {len(close_data.columns)} columns")
         
         # Drop rows with any NaN values
         close_data = close_data.dropna()
         
-        # 🔍 DEBUG: After dropna
         print(f"🔍 After dropna: {len(close_data)} rows, {len(close_data.columns)} columns")
         
-        # 🔍 DEBUG: Show date range
         if not close_data.empty:
             print(f"🔍 Date range: {close_data.index.min()} to {close_data.index.max()}")
             print(f"🔍 Sample data:\n{close_data.head()}")
         
-        # 🔍 CRITICAL: If only 5 rows, check what's happening
         if len(close_data) < 20:
             print(f"\n⚠️ WARNING: Only {len(close_data)} rows after dropna!")
-            print("   Checking for NaN counts per symbol:")
-            for col in close_data.columns:
-                nan_count = close_data[col].isna().sum()
-                if nan_count > 0:
-                    print(f"     {col}: {nan_count} NaN values")
-            
-            # Try filling NaN with forward fill
-            print("   Attempting forward fill...")
-            close_data = close_data.ffill().dropna()
-            print(f"   After ffill: {len(close_data)} rows")
         
         return close_data
