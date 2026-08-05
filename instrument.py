@@ -1,5 +1,5 @@
 """
-instrument.py - Instrument Manager with Raw Data Storage
+instrument.py - Instrument Manager with Token Lookup
 """
 
 import json
@@ -14,12 +14,9 @@ class InstrumentManager:
         self.symbol_map: Dict[str, str] = {}
         self._loaded = False
         self.cache_file = "token_cache.json"
-        self._raw_data = []  # Store raw instrument data
+        self._raw_data = []
     
     def load_master_contract(self) -> bool:
-        """
-        Load instruments with cache-first strategy
-        """
         if self.load_cache():
             print("✅ Using cached instruments")
             return True
@@ -39,9 +36,6 @@ class InstrumentManager:
         return False
     
     def download_scrip_master(self, url: str) -> bool:
-        """
-        Download Scrip Master JSON from given URL
-        """
         try:
             response = requests.get(url, timeout=15)
             
@@ -57,10 +51,8 @@ class InstrumentManager:
             if not data:
                 return False
             
-            # Store raw data for filtering
             self._raw_data = data
             
-            # Build token maps
             self.token_map = {}
             self.symbol_map = {}
             
@@ -70,9 +62,15 @@ class InstrumentManager:
                 exchange = item.get('exch_seg', '')
                 
                 if symbol and token and exchange in ['NSE', 'NSEFO']:
+                    # Store with and without -EQ
                     self.token_map[symbol] = token
-                    self.token_map[f"{symbol}.NS"] = token
-                    self.symbol_map[token] = symbol
+                    # Also store clean version (without -EQ)
+                    clean_symbol = symbol.replace('-EQ', '').strip()
+                    self.token_map[clean_symbol] = token
+                    # Store with .NS suffix
+                    self.token_map[f"{clean_symbol}.NS"] = token
+                    
+                    self.symbol_map[token] = clean_symbol
             
             self._loaded = True
             print(f"✅ Loaded {len(self.token_map)} symbols")
@@ -83,7 +81,6 @@ class InstrumentManager:
             return False
     
     def load_cache(self, filepath: str = "token_cache.json") -> bool:
-        """Load token map from cache"""
         try:
             if os.path.exists(filepath):
                 with open(filepath, 'r') as f:
@@ -98,7 +95,6 @@ class InstrumentManager:
         return False
     
     def save_cache(self, filepath: str = "token_cache.json") -> bool:
-        """Save token map to cache"""
         try:
             with open(filepath, 'w') as f:
                 json.dump({
@@ -112,22 +108,60 @@ class InstrumentManager:
             return False
     
     def get_token(self, symbol: str) -> Optional[str]:
+        """
+        Get token for a symbol - Supports multiple formats
+        """
         if not self._loaded:
             print("⚠️ Instruments not loaded")
             return None
         
         symbol_upper = symbol.upper()
-        token = self.token_map.get(symbol_upper)
         
-        if token:
-            return token
+        # Try all possible formats
+        lookup_formats = [
+            symbol_upper,                    # "RELIANCE"
+            f"{symbol_upper}-EQ",            # "RELIANCE-EQ"
+            f"{symbol_upper}.NS",            # "RELIANCE.NS"
+            symbol_upper.replace('_', '-'),  # "M_M" → "M-M"
+            f"{symbol_upper}-BE",            # "RELIANCE-BE"
+        ]
         
-        if symbol_upper.endswith('.NS'):
-            token = self.token_map.get(symbol_upper[:-3])
+        for fmt in lookup_formats:
+            token = self.token_map.get(fmt)
             if token:
                 return token
         
-        print(f"⚠️ Token not found: {symbol}")
+        # Try partial match
+        matching_keys = [k for k in self.token_map.keys() if symbol_upper in k or k.startswith(symbol_upper)]
+        if matching_keys:
+            print(f"⚠️ Token not found for '{symbol}'. Did you mean: {matching_keys[:3]}")
+        else:
+            print(f"⚠️ Token not found: {symbol}")
+        
+        return None
+    
+    def get_token_fast(self, symbol: str) -> Optional[str]:
+        """
+        Fast token lookup - auto adds -EQ suffix
+        """
+        if not self._loaded:
+            return None
+        
+        # Try direct lookup
+        token = self.token_map.get(symbol)
+        if token:
+            return token
+        
+        # Try with -EQ suffix
+        token = self.token_map.get(f"{symbol}-EQ")
+        if token:
+            return token
+        
+        # Try with .NS suffix
+        token = self.token_map.get(f"{symbol}.NS")
+        if token:
+            return token
+        
         return None
     
     def get_symbol(self, token: str) -> Optional[str]:
