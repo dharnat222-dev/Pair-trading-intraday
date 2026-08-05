@@ -13,11 +13,14 @@ class AngelDataFetcher:
         self.instrument = instrument_manager
         self.max_retries = 3
         self.retry_delay = 1
-        self.min_history_days = 150  # Minimum trading days required
+        self.min_history_days = 150
     
     def fetch(self, symbol: str, interval: str = "ONE_MINUTE", days: int = 5) -> Optional[pd.DataFrame]:
-        """Fetch historical OHLC data for a symbol"""
-        token = self.instrument.get_token(symbol)
+        """
+        Fetch historical OHLC data for a symbol
+        """
+        # 🔧 Use fast token lookup
+        token = self.instrument.get_token_fast(symbol)
         if not token:
             print(f"❌ Token not found for {symbol}")
             return None
@@ -82,7 +85,7 @@ class AngelDataFetcher:
             print("❌ No data fetched for any symbol")
             return pd.DataFrame()
         
-        # 🔍 Filter: Remove symbols with insufficient history
+        # Filter: Remove symbols with insufficient history
         valid_data = {}
         for symbol, df in data_dict.items():
             if len(df) >= self.min_history_days:
@@ -103,14 +106,12 @@ class AngelDataFetcher:
         
         print(f"\n🔍 Before dropna: {len(close_data)} rows, {len(close_data.columns)} columns")
         
-        # Drop rows with any NaN values
         close_data = close_data.dropna()
         
         print(f"🔍 After dropna: {len(close_data)} rows, {len(close_data.columns)} columns")
         
         if not close_data.empty:
             print(f"🔍 Date range: {close_data.index.min()} to {close_data.index.max()}")
-            print(f"🔍 Sample data:\n{close_data.head()}")
         
         if len(close_data) < 20:
             print(f"\n⚠️ WARNING: Only {len(close_data)} rows after dropna!")
