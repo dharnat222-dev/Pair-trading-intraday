@@ -1,6 +1,6 @@
 """
-main.py - Professional Pair Trading Scanner (Yahoo Finance Data)
-Angel One kept only for login and sector mapping.
+main.py - Professional Pair Trading Scanner
+Full NSE scan with batch processing, rate limit handling, and statistics
 """
 
 import warnings
@@ -36,28 +36,26 @@ logger.info("📊 PAIR TRADING SCANNER - YAHOO FINANCE")
 logger.info("=" * 60)
 logger.info(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ========== ANGEL ONE LOGIN (OPTIONAL - ONLY FOR SECTOR MAP) ==========
-ANGEL_API_KEY = os.getenv("ANGEL_API_KEY")
-ANGEL_CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-ANGEL_PASSWORD = os.getenv("ANGEL_PASSWORD")
-ANGEL_TOTP_SECRET = os.getenv("ANGEL_TOTP")
+# ========== CREDENTIALS ==========
+API_KEY = os.getenv("ANGEL_API_KEY")
+CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
+PASSWORD = os.getenv("ANGEL_PASSWORD")
+TOTP_SECRET = os.getenv("ANGEL_TOTP")
 
 obj = None
 instrument_mgr = None
 sector_map = SECTOR_MAP.copy()
 
-# Try to login to Angel One for sector mapping (optional)
-if all([ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP_SECRET]):
+# ========== ANGEL ONE LOGIN (OPTIONAL - ONLY FOR SECTOR MAP) ==========
+if all([API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET]):
     try:
-        import pyotp
         from SmartApi import SmartConnect
-
         logger.info("🔄 Logging in to Angel One for sector mapping...")
-        totp = pyotp.TOTP(ANGEL_TOTP_SECRET).now()
-        obj = SmartConnect(api_key=ANGEL_API_KEY)
+        totp = pyotp.TOTP(TOTP_SECRET).now()
+        obj = SmartConnect(api_key=API_KEY)
         response = obj.generateSession(
-            clientCode=ANGEL_CLIENT_ID,
-            password=ANGEL_PASSWORD,
+            clientCode=CLIENT_ID,
+            password=PASSWORD,
             totp=totp
         )
 
@@ -81,7 +79,6 @@ if instrument_mgr is not None:
     all_stocks = universe.load_all_stocks()
     liquid_stocks = universe.filter_liquid_stocks()
 else:
-    # Fallback universe without Angel One
     universe = StockUniverse(None)
     all_stocks = []
     liquid_stocks = []
@@ -128,9 +125,9 @@ logger.info(f"📊 Fetching data for {len(symbols_to_scan)} stocks from Yahoo Fi
 try:
     data_dict = fetcher.fetch_batch(
         symbols_to_scan,
-        days=250,  # ~1 year of daily data
+        days=250,
         interval="1d",
-        parallel=False  # Sequential to avoid rate limits
+        parallel=False
     )
 except Exception as e:
     logger.error(f"❌ Data fetch error: {e}")
@@ -143,21 +140,99 @@ if not data_dict:
     logger.error("❌ No data fetched. Exiting.")
     sys.exit(1)
 
-# ========== BUILD DATAFRAME ==========
-logger.info("📊 Building close price DataFrame...")
-close_data = pd.DataFrame()
+# ========== BUILD DATAFRAME WITH PROPER DATE ALIGNMENT ==========
+logger.info("=" * 60)
+logger.info("📊 BUILDING CLOSE PRICE DATAFRAME")
+logger.info("=" * 60)
+
+# Normalize all timestamps to date-only (remove timezone and time)
+date_aligned_data = {}
+rows_before = 0
+
 for symbol, df in data_dict.items():
-    close_data[symbol] = df.set_index('timestamp')['close']
+    # Create a copy to avoid modifying original
+    df_copy = df.copy()
+    
+    # Convert to datetime and normalize to date only
+    # This removes timezone and time components
+    df_copy['date'] = pd.to_datetime(df_copy['timestamp']).dt.date
+    
+    # Set date as index
+    df_copy = df_copy.set_index('date')
+    
+    # Keep only close price
+    date_aligned_data[symbol] = df_copy['close']
+    rows_before += len(df_copy)
 
-logger.info(f"   Before dropna: {len(close_data)} rows, {len(close_data.columns)} stocks")
+# Create DataFrame with all symbols
+close_data = pd.DataFrame(date_aligned_data)
 
+logger.info(f"   Rows before merge (total candles): {rows_before}")
+logger.info(f"   Raw close_data shape: {close_data.shape}")
+
+# Drop rows with any NaN (symbols with missing trading days)
 close_data = close_data.dropna()
 
-logger.info(f"   After dropna: {len(close_data)} rows, {len(close_data.columns)} stocks")
+logger.info(f"   Rows after dropna: {len(close_data)} rows")
+logger.info(f"   Columns (stocks): {len(close_data.columns)}")
+logger.info(f"   Date range: {close_data.index.min()} to {close_data.index.max()}")
+
+# Check data quality
+expected_rows = 240
+actual_rows = len(close_data)
+
+# If we lost too many rows, analyze missing data
+if actual_rows < expected_rows:
+    logger.warning(f"⚠️ Only {actual_rows} rows after alignment (expected ~{expected_rows})")
+    
+    # Check each symbol's data length
+    row_counts = {}
+    for symbol, df in data_dict.items():
+        dates = pd.to_datetime(df['timestamp']).dt.date
+        row_counts[symbol] = len(set(dates))
+    
+    # Find symbols with too few rows
+    low_count_symbols = [s for s, c in row_counts.items() if c < expected_rows - 20]
+    if low_count_symbols:
+        logger.warning(f"   Symbols with <{expected_rows-20} rows: {len(low_count_symbols)}")
+        for s in low_count_symbols[:10]:
+            logger.warning(f"     {s}: {row_counts[s]} rows")
+    
+    # Try forward fill for missing days (recover data)
+    logger.info("   Attempting forward fill to recover missing dates...")
+    close_data = close_data.ffill().dropna()
+    logger.info(f"   After ffill: {len(close_data)} rows, {len(close_data.columns)} stocks")
+    
+    # If still low, try backward fill too
+    if len(close_data) < expected_rows - 20:
+        logger.info("   Attempting backward fill...")
+        close_data = close_data.bfill().dropna()
+        logger.info(f"   After bfill: {len(close_data)} rows, {len(close_data.columns)} stocks")
+
+# Additional alignment: ensure all dates are sorted
+close_data = close_data.sort_index()
+
+# Calculate missing percentage
+total_cells = len(close_data) * len(close_data.columns)
+if total_cells > 0:
+    nan_count = close_data.isna().sum().sum()
+    missing_pct = (nan_count / total_cells) * 100
+    logger.info(f"   Missing data percentage: {missing_pct:.2f}%")
+else:
+    logger.error("❌ No data after alignment. Exiting.")
+    sys.exit(1)
+
+if len(close_data) < 20:
+    logger.error(f"❌ Only {len(close_data)} rows after alignment. Minimum 20 required.")
+    sys.exit(1)
 
 if len(close_data.columns) < 5:
     logger.error(f"❌ Only {len(close_data.columns)} stocks available. Minimum 5 required.")
     sys.exit(1)
+
+logger.info(f"   Final close_data shape: {close_data.shape}")
+logger.info(f"   Sample data:\n{close_data.head()}")
+logger.info("✅ DataFrame built successfully!")
 
 # ========== PAIR SELECTION ==========
 logger.info("=" * 60)
@@ -265,6 +340,7 @@ logger.info(f"  Data source: Yahoo Finance")
 logger.info(f"  Total stocks in universe: {len(all_stocks)}")
 logger.info(f"  Stocks scanned: {len(symbols_to_scan)}")
 logger.info(f"  Data fetched: {len(data_dict)} stocks")
+logger.info(f"  Trading days: {len(close_data)}")
 logger.info(f"  Pairs selected: {len(top_pairs)}")
 logger.info(f"  Scan mode: {SCAN_MODE}")
 logger.info(f"  Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
