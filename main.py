@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner (Full NSE Scan)
+main.py - Professional Pair Scanner (Full NSE Scan)
 """
 
 import warnings
@@ -9,7 +9,7 @@ import sys
 import os
 import pyotp
 import pandas as pd
-from data_fetcher import AngelDataFetcher
+from batch_fetcher import BatchFetcher
 from instrument import InstrumentManager
 from pair_engine_v7 import PairEngineV7
 from universe import StockUniverse
@@ -68,41 +68,64 @@ print(f"   Total sectors: {len(sector_map)} symbols")
 # ========== UNIVERSE ==========
 print("\n🌐 Building trading universe...")
 universe = StockUniverse(instrument_mgr)
-all_stocks = universe.load_all_stocks()
-liquid_stocks = universe.filter_liquid_stocks()
+all_stocks = universe.load_all_stocks()  # 2440 -EQ stocks
+liquid_stocks = universe.filter_liquid_stocks()  # 43 F&O stocks
 
-print(f"   Total NSE stocks: {len(all_stocks)}")
+print(f"   Total NSE -EQ stocks: {len(all_stocks)}")
 print(f"   Liquid stocks: {len(liquid_stocks)}")
 
-if not liquid_stocks:
-    print("❌ No liquid stocks found")
-    sys.exit(1)
+# ========== OPTION: SCAN ALL OR LIMITED ==========
+# Option 1: Scan all 2440 stocks (SLOW - 30 lakh pairs)
+# Option 2: Scan 500 stocks (FAST - 1.25 lakh pairs)
+# Option 3: Scan only liquid stocks (VERY FAST - 903 pairs)
 
-# ========== STAGE-1: PAIR SELECTION ==========
+SCAN_MODE = "FAST"  # "FULL", "MEDIUM", "FAST"
+
+if SCAN_MODE == "FULL":
+    symbols_to_scan = all_stocks
+    print("\n🔴 FULL SCAN: 2440 stocks (may take 1-2 hours)")
+elif SCAN_MODE == "MEDIUM":
+    symbols_to_scan = all_stocks[:500]
+    print("\n🟡 MEDIUM SCAN: 500 stocks (may take 15-30 minutes)")
+else:  # FAST
+    symbols_to_scan = liquid_stocks
+    print("\n🟢 FAST SCAN: 43 liquid stocks (takes 2-3 minutes)")
+
+print(f"   Scanning {len(symbols_to_scan)} stocks")
+
+# ========== FETCH DATA ==========
 print("\n" + "=" * 60)
-print("📊 STAGE 1: PAIR SELECTION")
+print("📊 STAGE 1: DATA FETCH (Batch Processing)")
 print("=" * 60)
 
-fetcher = AngelDataFetcher(obj, instrument_mgr)
+fetcher = BatchFetcher(obj, instrument_mgr)
 
-# 🔧 FIX: Use ALL liquid stocks, not just 30
-print(f"\n📊 Fetching data for {len(liquid_stocks)} liquid stocks...")
-print("   ⚠️ This will take 5-10 minutes for 100+ stocks...")
+print(f"\n📊 Fetching data for {len(symbols_to_scan)} stocks...")
+print("   ⚠️ This may take several minutes...")
 
-close_data_daily = fetcher.fetch_close_prices(
-    liquid_stocks,  # 🔧 ALL liquid stocks
-    interval="ONE_DAY",
-    days=250
-)
+data_dict = fetcher.fetch_batch(symbols_to_scan, days=250)
 
-if close_data_daily.empty:
-    print("❌ No daily data fetched")
+print(f"\n✅ Data fetched for {len(data_dict)} stocks")
+
+if not data_dict:
+    print("❌ No data fetched")
     sys.exit(1)
 
-print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
+# Build close price DataFrame
+close_data = pd.DataFrame()
+for symbol, df in data_dict.items():
+    close_data[symbol] = df.set_index('timestamp')['close']
 
-# Run Pair Engine
-engine = PairEngineV7(close_data_daily, sector_map)
+close_data = close_data.dropna()
+
+print(f"\n✅ Data: {len(close_data)} rows, {len(close_data.columns)} stocks")
+
+# ========== PAIR SELECTION ==========
+print("\n" + "=" * 60)
+print("📊 STAGE 2: PAIR SELECTION")
+print("=" * 60)
+
+engine = PairEngineV7(close_data, sector_map)
 results = engine.scan_pairs()
 
 engine.display_debug_report(n=20)
