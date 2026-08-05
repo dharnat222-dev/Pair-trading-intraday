@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner with Instrument Check
+main.py - Pair Scanner with DataFrame Debug
 """
 
 import warnings
@@ -16,7 +16,7 @@ from universe import StockUniverse
 from sector_map import SECTOR_MAP
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER")
+print("📊 PAIR TRADING SCANNER (DEBUG)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -57,7 +57,7 @@ print("✅ Login Successful!")
 print("\n📥 Loading instruments...")
 instrument_mgr = InstrumentManager(obj)
 if not instrument_mgr.load_master_contract():
-    print("\n❌ Failed to load instruments. Exiting...")
+    print("❌ Failed to load instruments")
     sys.exit(1)
 
 # ========== UNIVERSE ==========
@@ -70,30 +70,40 @@ print(f"   Total NSE stocks: {len(all_stocks)}")
 print(f"   Liquid stocks: {len(liquid_stocks)}")
 
 if not liquid_stocks:
-    print("\n❌ No liquid stocks found. Exiting...")
+    print("❌ No liquid stocks found")
     sys.exit(1)
 
 # ========== STAGE-1: PAIR SELECTION ==========
 print("\n" + "=" * 60)
-print("📊 STAGE 1: PAIR SELECTION (Daily Data)")
+print("📊 STAGE 1: PAIR SELECTION")
 print("=" * 60)
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-print(f"\n📊 Fetching daily data for {len(liquid_stocks)} stocks...")
+# Use limited symbols for testing
+test_symbols = liquid_stocks[:20]
+print(f"\n📊 Testing with {len(test_symbols)} symbols...")
+
 close_data_daily = fetcher.fetch_close_prices(
-    liquid_stocks, 
-    interval="ONE_DAY", 
+    test_symbols,
+    interval="ONE_DAY",
     days=250
 )
+
+print("\n" + "=" * 60)
+print("📊 DATAFRAME DEBUG")
+print("=" * 60)
+print(f"Shape: {close_data_daily.shape}")
+print(f"Columns: {list(close_data_daily.columns)[:10]}...")
+print(f"Date range: {close_data_daily.index.min()} to {close_data_daily.index.max()}")
 
 if close_data_daily.empty:
     print("❌ No daily data fetched. Exiting.")
     sys.exit(1)
 
-if len(close_data_daily.columns) < 5:
-    print(f"❌ Only {len(close_data_daily.columns)} stocks available. Minimum 5 required.")
-    sys.exit(1)
+if len(close_data_daily) < 20:
+    print(f"⚠️ WARNING: Only {len(close_data_daily)} rows!")
+    print("   Running pair_engine with minimal data may give no results.")
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
