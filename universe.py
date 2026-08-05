@@ -13,9 +13,6 @@ class StockUniverse:
         self.liquid_stocks = []
     
     def load_all_stocks(self) -> List[str]:
-        """
-        Load all NSE equity stocks from instrument manager
-        """
         if not self.instrument_mgr.is_loaded():
             print("❌ Instruments not loaded")
             return []
@@ -26,50 +23,49 @@ class StockUniverse:
         print(f"🔍 First 20 symbols: {all_symbols[:20]}")
         
         self.all_stocks = []
+        seen = set()
+        
         for symbol in all_symbols:
-            # ❌ SKIP: Trade-to-Trade / Surveillance stocks
-            if '-ST' in symbol or symbol.endswith('-ST'):
+            # Skip indices
+            if any(x in symbol for x in ['NIFTY', 'SENSEX', 'BANK', 'MIDCAP']):
                 continue
             
-            # ❌ SKIP: Derivatives
+            # Skip derivatives
             if any(symbol.endswith(suffix) for suffix in ['-BE', '-SM', '-FO', '-BZ']):
                 continue
             
-            # ❌ SKIP: Special characters
+            # Skip ST stocks
+            if '-ST' in symbol or symbol.endswith('-ST'):
+                continue
+            
+            # Skip special chars
             if ' ' in symbol or '&' in symbol:
                 continue
             
-            # ❌ SKIP: Too short
             if len(symbol) < 2:
                 continue
             
-            # Keep clean symbols
-            if symbol.isalpha() or (symbol.replace('-', '').isalpha() and not symbol.startswith('-')):
-                self.all_stocks.append(symbol)
-        
-        # Also try to get from raw data
-        if hasattr(self.instrument_mgr, '_raw_data'):
-            for item in self.instrument_mgr._raw_data:
-                symbol = item.get('symbol', '').upper()
-                exchange = item.get('exch_seg', '')
-                if exchange in ['NSE', 'NSEFO'] and symbol:
-                    if '-ST' not in symbol and symbol not in self.all_stocks:
-                        self.all_stocks.append(symbol)
+            # Clean symbol
+            clean_symbol = symbol.replace('-EQ', '').strip()
+            
+            if clean_symbol in seen:
+                continue
+            
+            if clean_symbol.replace('.', '').replace('-', '').isalnum():
+                seen.add(clean_symbol)
+                self.all_stocks.append(clean_symbol)
         
         print(f"✅ Loaded {len(self.all_stocks)} NSE equity stocks")
         print(f"🔍 Sample stocks: {self.all_stocks[:10]}")
         
         return self.all_stocks
     
-    def filter_liquid_stocks(self, 
-                             min_price: float = 50.0,
-                             min_volume: int = 100000,
-                             min_turnover: float = 1000000) -> List[str]:
+    def filter_liquid_stocks(self) -> List[str]:
         """
-        Filter stocks based on liquidity criteria
+        Filter liquid stocks - Use F&O list + high volume stocks
         """
-        # Known liquid stocks (F&O list)
-        known_liquid = [
+        # F&O Stocks (most liquid)
+        fo_stocks = [
             "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS",
             "HINDUNILVR", "ITC", "KOTAKBANK", "LT", "AXISBANK", "WIPRO",
             "MARUTI", "SUNPHARMA", "TITAN", "BAJFINANCE", "BHARTIARTL",
@@ -78,18 +74,19 @@ class StockUniverse:
             "INDUSINDBK", "ADANIPORTS", "GRASIM", "DIVISLAB", "HDFCLIFE",
             "DRREDDY", "EICHERMOT", "SBILIFE", "BPCL", "COALINDIA",
             "BRITANNIA", "HINDALCO", "APOLLOHOSP", "UPL", "TATAMOTORS",
-            "CIPLA", "ICICIPRULI"
+            "CIPLA", "ICICIPRULI", "HDFC", "ADANIENT", "VEDL", 
+            "JSWSTEEL", "HDFC", "BAJAJFINSV", "TATACONSUM"
         ]
         
-        # Filter: only keep those that exist in our all_stocks list
-        self.liquid_stocks = [s for s in known_liquid if s in self.all_stocks]
+        # Filter: only keep those in all_stocks
+        self.liquid_stocks = [s for s in fo_stocks if s in self.all_stocks]
         
-        # If no liquid stocks found, use all stocks as fallback
+        # If no liquid stocks, use all stocks as fallback
         if not self.liquid_stocks:
-            print("⚠️ No liquid stocks found. Using all stocks as fallback.")
-            self.liquid_stocks = [s for s in self.all_stocks if '-ST' not in s][:100]
+            print("⚠️ No F&O stocks found. Using all stocks as fallback.")
+            self.liquid_stocks = self.all_stocks[:500]
         
         print(f"✅ Filtered {len(self.liquid_stocks)} liquid stocks")
         print(f"🔍 Liquid samples: {self.liquid_stocks[:10]}")
         
-        return self.liquid_stocks 
+        return self.liquid_stocks
