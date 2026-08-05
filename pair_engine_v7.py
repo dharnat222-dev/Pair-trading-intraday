@@ -1,6 +1,6 @@
 """
-pair_engine_v7.py - Professional Pair Selection Engine V7.2
-No sklearn dependency, Pure NumPy for Beta and Half-life
+pair_engine_v7.py - Professional Pair Selection Engine
+Sector Filter OFF for testing
 """
 
 import pandas as pd
@@ -46,13 +46,11 @@ class PairEngineV7:
     def _calculate_beta(self, s1: str, s2: str, clean: pd.DataFrame) -> float:
         """
         Calculate Beta using pure NumPy polyfit
-        No sklearn dependency
         """
         try:
             x = clean[s1].values.astype(float)
             y = clean[s2].values.astype(float)
             
-            # Remove NaN/inf
             mask = np.isfinite(x) & np.isfinite(y)
             x = x[mask]
             y = y[mask]
@@ -60,10 +58,8 @@ class PairEngineV7:
             if len(x) < 10:
                 return 1.0
             
-            # NumPy polyfit: y = beta * x + alpha
             beta = np.polyfit(x, y, 1)[0]
             
-            # If beta is 0 or very small, use 1.0
             if abs(beta) < 0.01:
                 return 1.0
                 
@@ -74,7 +70,6 @@ class PairEngineV7:
     def _calculate_half_life(self, spread: pd.Series) -> float:
         """
         Calculate Half-life using pure NumPy
-        No sklearn dependency
         """
         if len(spread) < 10:
             return 50
@@ -90,7 +85,6 @@ class PairEngineV7:
             spread_lag = spread_lag[:min_len]
             spread_diff = spread_diff[:min_len]
             
-            # NumPy polyfit: spread_diff = theta * spread_lag + alpha
             theta = np.polyfit(spread_lag, spread_diff, 1)[0]
             
             if theta < 0:
@@ -117,23 +111,23 @@ class PairEngineV7:
         }
         
         try:
-            # Clean data - ALIGN dates
             clean = pd.DataFrame({s1: self.data[s1], s2: self.data[s2]}).dropna()
             if len(clean) < 60:
                 result['reject_reason'].append(f"Insufficient data: {len(clean)} rows")
                 return result
             
-            # 1. Sector Filter
-            sector1 = self._get_sector(s1)
-            sector2 = self._get_sector(s2)
-            result['debug']['sector'] = f"{sector1} ↔ {sector2}"
-            
-            if sector1 != sector2 or sector1 == "Unknown":
-                result['reject_reason'].append(f"Sector mismatch: {sector1} vs {sector2}")
-                return result
+            # ============================================================
+            # SECTOR FILTER - DISABLED FOR TESTING
+            # ============================================================
+            # sector1 = self._get_sector(s1)
+            # sector2 = self._get_sector(s2)
+            # if sector1 != sector2 or sector1 == "Unknown":
+            #     result['reject_reason'].append(f"Sector mismatch: {sector1} vs {sector2}")
+            #     return result
+            result['debug']['sector'] = "SECTOR_FILTER_OFF"
             result['debug']['sector_pass'] = "✅"
             
-            # 2. Correlation (on aligned data)
+            # 2. Correlation
             corr = clean[s1].corr(clean[s2])
             result['metrics']['correlation'] = round(corr, 4)
             result['debug']['corr'] = f"{corr:.3f}"
@@ -154,7 +148,7 @@ class PairEngineV7:
                 return result
             result['debug']['rolling_corr_pass'] = "✅"
             
-            # 4. Beta (Pure NumPy)
+            # 4. Beta
             beta = self._calculate_beta(s1, s2, clean)
             result['metrics']['beta'] = round(beta, 3)
             result['debug']['beta'] = f"{beta:.2f}"
@@ -236,7 +230,7 @@ class PairEngineV7:
     def scan_pairs(self) -> list:
         symbols = list(self.data.columns)
         print(f"\n🔍 Scanning {len(symbols)} stocks for pair selection...")
-        print(f"   Filters: Same Sector, Corr≥0.55, Beta 0.4-2.0, Hurst<0.50")
+        print(f"   Filters: Corr≥0.55, Beta 0.4-2.0, Hurst<0.50 (Sector Filter OFF)")
         
         results = []
         self.debug_log = []
@@ -266,7 +260,7 @@ class PairEngineV7:
             return
         
         print("\n" + "=" * 110)
-        print(f"📋 FULL DEBUG REPORT (Same Sector Pairs Only)")
+        print(f"📋 FULL DEBUG REPORT")
         print("=" * 110)
         
         count = 0
@@ -274,16 +268,12 @@ class PairEngineV7:
             if count >= n:
                 break
             s1, s2 = r['pair']
-            
-            if r['debug'].get('sector_pass') != "✅":
-                continue
-            
             count += 1
+            
             status = "✅ PASS" if r['valid'] else "❌ FAIL"
             score = r['metrics'].get('score', 0)
             
             print(f"\n{count}. {s1:12} ↔ {s2:12} [{status}] Score: {score:.1f}")
-            print(f"   Sector: {r['debug'].get('sector', 'Unknown')}")
             
             corr = r['debug'].get('corr', '0.00')
             rc = r['debug'].get('rolling_corr', '0.00')
@@ -311,8 +301,7 @@ class PairEngineV7:
         for i, r in enumerate(self.results[:n], 1):
             s1, s2 = r['pair']
             m = r['metrics']
-            sector1 = self._get_sector(s1)
-            print(f"\n{i}. {s1:12} ↔ {s2:12} | Score: {m['score']:.1f} | Sector: {sector1}")
+            print(f"\n{i}. {s1:12} ↔ {s2:12} | Score: {m['score']:.1f}")
             print(f"   📈 Corr: {m['correlation']:.3f} | 🔄 RollCorr: {m['rolling_corr']:.3f}")
             print(f"   📉 Coint: {m['coint_pval']:.4f} | 📊 Beta: {m['beta']:.3f}")
             print(f"   🌀 Hurst: {m['hurst']:.3f} | ⏱️ Half-life: {m['half_life']:.1f} min")
