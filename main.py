@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner with Sector Filter OFF
+main.py - Pair Scanner (Full NSE Scan)
 """
 
 import warnings
@@ -16,7 +16,7 @@ from universe import StockUniverse
 from sector_map import SECTOR_MAP, load_sectors_from_scrip_master
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER")
+print("📊 PAIR TRADING SCANNER (FULL NSE SCAN)")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -85,12 +85,12 @@ print("=" * 60)
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-# Use liquid stocks
-test_symbols = liquid_stocks[:30]
-print(f"\n📊 Testing with {len(test_symbols)} symbols...")
+# 🔧 FIX: Use ALL liquid stocks, not just 30
+print(f"\n📊 Fetching data for {len(liquid_stocks)} liquid stocks...")
+print("   ⚠️ This will take 5-10 minutes for 100+ stocks...")
 
 close_data_daily = fetcher.fetch_close_prices(
-    test_symbols,
+    liquid_stocks,  # 🔧 ALL liquid stocks
     interval="ONE_DAY",
     days=250
 )
@@ -101,7 +101,7 @@ if close_data_daily.empty:
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
-# Run Pair Engine with Sector Filter OFF
+# Run Pair Engine
 engine = PairEngineV7(close_data_daily, sector_map)
 results = engine.scan_pairs()
 
