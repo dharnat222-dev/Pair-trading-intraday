@@ -20,41 +20,42 @@ class StockUniverse:
             print("❌ Instruments not loaded")
             return []
         
-        # 🔍 DEBUG: Print all available keys in token_map
         print(f"\n🔍 Total symbols in token_map: {len(self.instrument_mgr.token_map)}")
         
-        # Get all symbols from token_map
         all_symbols = list(self.instrument_mgr.token_map.keys())
-        
-        # 🔍 DEBUG: Print first 20 symbols to understand format
         print(f"🔍 First 20 symbols: {all_symbols[:20]}")
         
-        # Filter only NSE equity stocks
         self.all_stocks = []
         for symbol in all_symbols:
-            # Skip if it has special suffixes (derivatives)
+            # ❌ SKIP: Trade-to-Trade / Surveillance stocks
+            if '-ST' in symbol or symbol.endswith('-ST'):
+                continue
+            
+            # ❌ SKIP: Derivatives
             if any(symbol.endswith(suffix) for suffix in ['-BE', '-SM', '-FO', '-BZ']):
                 continue
-            # Skip if it contains spaces or special chars
+            
+            # ❌ SKIP: Special characters
             if ' ' in symbol or '&' in symbol:
                 continue
-            # Skip if symbol is too short or contains numbers (may be not equity)
+            
+            # ❌ SKIP: Too short
             if len(symbol) < 2:
                 continue
-            # Keep only clean symbols (alphabetical with possible hyphens)
+            
+            # Keep clean symbols
             if symbol.isalpha() or (symbol.replace('-', '').isalpha() and not symbol.startswith('-')):
                 self.all_stocks.append(symbol)
         
-        # Also try to get from instrument manager's raw data if available
+        # Also try to get from raw data
         if hasattr(self.instrument_mgr, '_raw_data'):
             for item in self.instrument_mgr._raw_data:
                 symbol = item.get('symbol', '').upper()
                 exchange = item.get('exch_seg', '')
                 if exchange in ['NSE', 'NSEFO'] and symbol:
-                    if symbol not in self.all_stocks:
+                    if '-ST' not in symbol and symbol not in self.all_stocks:
                         self.all_stocks.append(symbol)
         
-        # 🔍 DEBUG: Print count
         print(f"✅ Loaded {len(self.all_stocks)} NSE equity stocks")
         print(f"🔍 Sample stocks: {self.all_stocks[:10]}")
         
@@ -67,8 +68,7 @@ class StockUniverse:
         """
         Filter stocks based on liquidity criteria
         """
-        # Since we don't have real-time price/volume here,
-        # use a list of known liquid stocks as fallback
+        # Known liquid stocks (F&O list)
         known_liquid = [
             "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS",
             "HINDUNILVR", "ITC", "KOTAKBANK", "LT", "AXISBANK", "WIPRO",
@@ -87,9 +87,9 @@ class StockUniverse:
         # If no liquid stocks found, use all stocks as fallback
         if not self.liquid_stocks:
             print("⚠️ No liquid stocks found. Using all stocks as fallback.")
-            self.liquid_stocks = self.all_stocks[:100]
+            self.liquid_stocks = [s for s in self.all_stocks if '-ST' not in s][:100]
         
         print(f"✅ Filtered {len(self.liquid_stocks)} liquid stocks")
         print(f"🔍 Liquid samples: {self.liquid_stocks[:10]}")
         
-        return self.liquid_stocks
+        return self.liquid_stocks 
