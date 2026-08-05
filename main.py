@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner with DataFrame Debug
+main.py - Pair Scanner with Auto-Generated Sectors
 """
 
 import warnings
@@ -13,10 +13,10 @@ from data_fetcher import AngelDataFetcher
 from instrument import InstrumentManager
 from pair_engine_v7 import PairEngineV7
 from universe import StockUniverse
-from sector_map import SECTOR_MAP
+from sector_map import SECTOR_MAP, load_sectors_from_scrip_master
 
 print("=" * 60)
-print("📊 PAIR TRADING SCANNER (DEBUG)")
+print("📊 PAIR TRADING SCANNER")
 print("=" * 60)
 
 # ========== CREDENTIALS ==========
@@ -60,6 +60,11 @@ if not instrument_mgr.load_master_contract():
     print("❌ Failed to load instruments")
     sys.exit(1)
 
+# ========== AUTO-GENERATE SECTORS ==========
+print("\n📥 Generating sector map...")
+sector_map = load_sectors_from_scrip_master(instrument_mgr)
+print(f"   Total sectors: {len(sector_map)} symbols")
+
 # ========== UNIVERSE ==========
 print("\n🌐 Building trading universe...")
 universe = StockUniverse(instrument_mgr)
@@ -80,8 +85,8 @@ print("=" * 60)
 
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
-# Use limited symbols for testing
-test_symbols = liquid_stocks[:20]
+# Use liquid stocks
+test_symbols = liquid_stocks[:30]  # Test with 30 stocks
 print(f"\n📊 Testing with {len(test_symbols)} symbols...")
 
 close_data_daily = fetcher.fetch_close_prices(
@@ -90,25 +95,14 @@ close_data_daily = fetcher.fetch_close_prices(
     days=250
 )
 
-print("\n" + "=" * 60)
-print("📊 DATAFRAME DEBUG")
-print("=" * 60)
-print(f"Shape: {close_data_daily.shape}")
-print(f"Columns: {list(close_data_daily.columns)[:10]}...")
-print(f"Date range: {close_data_daily.index.min()} to {close_data_daily.index.max()}")
-
 if close_data_daily.empty:
-    print("❌ No daily data fetched. Exiting.")
+    print("❌ No daily data fetched")
     sys.exit(1)
-
-if len(close_data_daily) < 20:
-    print(f"⚠️ WARNING: Only {len(close_data_daily)} rows!")
-    print("   Running pair_engine with minimal data may give no results.")
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
-# Run Pair Engine
-engine = PairEngineV7(close_data_daily, SECTOR_MAP)
+# Run Pair Engine with auto-generated sector map
+engine = PairEngineV7(close_data_daily, sector_map)
 results = engine.scan_pairs()
 
 engine.display_debug_report(n=20)
