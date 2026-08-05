@@ -1,42 +1,64 @@
-name: SmartAPI Import Test
+name: Auto Pair Trading Scan
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  schedule:
+    # દર 30 મિનિટે (સોમ-શુક્ર, સવાર 9:30 થી બપોર 3:30)
+    - cron: '*/30 4-10 * * 1-5'  # UTC time (IST = UTC + 5:30)
+  workflow_dispatch:              # Manual trigger
 
 jobs:
-  test:
+  scan:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout code
+      # 1. Repository Clone
+      - name: Checkout repository
         uses: actions/checkout@v4
-      
+
+      # 2. Python Setup
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      
+          cache: 'pip'
+
+      # 3. Dependencies Install
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
-      - name: Test SmartAPI Import
+          pip install yfinance pandas numpy statsmodels scipy
+
+      # 4. Scanner Run
+      - name: Run Pair Scanner
         run: python main.py
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP: ${{ secrets.ANGEL_TOTP }}
-      
-      - name: Upload test results
+          SCAN_MODE: FAST
+
+      # 5. ✅ UPLOAD ALL OUTPUTS (FIXED)
+      - name: Upload Scanner Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-output
+          name: scanner-output-${{ github.run_id }}
+          path: |
+            output/*.csv
+            scanner.log
+            pairs.csv
+            token_cache.json
+          retention-days: 7
+
+      # 6. (Optional) Error Logs
+      - name: Upload error logs if any
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs-${{ github.run_id }}
           path: |
             *.log
-            *.txt
+            data/fetch_status.json
           retention-days: 7
