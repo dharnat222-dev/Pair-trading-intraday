@@ -37,7 +37,7 @@ jobs:
           ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP: ${{ secrets.ANGEL_TOTP }}
-          SCAN_MODE: FAST
+          SCAN_MODE: FULL
 
       # 5. ✅ UPLOAD ALL OUTPUTS (FIXED)
       - name: Upload Scanner Results
