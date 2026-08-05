@@ -1,5 +1,5 @@
 """
-main.py - Pair Scanner with Auto-Generated Sectors
+main.py - Pair Scanner with Sector Filter OFF
 """
 
 import warnings
@@ -86,7 +86,7 @@ print("=" * 60)
 fetcher = AngelDataFetcher(obj, instrument_mgr)
 
 # Use liquid stocks
-test_symbols = liquid_stocks[:30]  # Test with 30 stocks
+test_symbols = liquid_stocks[:30]
 print(f"\n📊 Testing with {len(test_symbols)} symbols...")
 
 close_data_daily = fetcher.fetch_close_prices(
@@ -101,7 +101,7 @@ if close_data_daily.empty:
 
 print(f"\n✅ Daily data: {len(close_data_daily)} rows, {len(close_data_daily.columns)} stocks")
 
-# Run Pair Engine with auto-generated sector map
+# Run Pair Engine with Sector Filter OFF
 engine = PairEngineV7(close_data_daily, sector_map)
 results = engine.scan_pairs()
 
@@ -114,7 +114,6 @@ if top_pairs:
     df_pairs = pd.DataFrame([{
         'pair1': r['pair'][0],
         'pair2': r['pair'][1],
-        'sector': engine._get_sector(r['pair'][0]),
         'correlation': r['metrics']['correlation'],
         'rolling_corr': r['metrics']['rolling_corr'],
         'coint_pval': r['metrics']['coint_pval'],
