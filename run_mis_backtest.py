@@ -230,4 +230,129 @@ def main() -> None:
                 if abs(z0) >= STOP_Z:
                     reason = "STOP"
                 elif abs(z0) < EXIT_Z:
-                    reason = 
+                    reason = "TARGET"
+                elif p["bars"] >= TIME_STOP:
+                    reason = "TIME"
+                if reason:
+                    flatten({p["a"]: r1, p["b"]: r2}, reason, ts)
+            if halt or tstr < "09:30" or tstr > "14:15" or tstr == "09:15":
+                mtm = cash
+                for p in pos:
+                    r1, r2 = rowmap.get(p["a"]), rowmap.get(p["b"])
+                    if r1 is None:
+                        continue
+                    mtm += p["side"] * (
+                        (float(r2.close) - p["e2"]) * p["q2"]
+                        - (float(r1.close) - p["e1"]) * p["q1"]
+                    )
+                equity = mtm
+                peak = max(peak, equity)
+                maxdd = min(maxdd, (equity - peak) / peak if peak else 0)
+                continue
+            nxt = None
+            times = sorted(block_rows["timestamp"].unique())
+            try:
+                j = times.get_loc(ts) if hasattr(times, "get_loc") else list(times).index(ts)
+                if j + 1 < len(times):
+                    nxt = pd.Timestamp(list(times)[j + 1])
+            except Exception:
+                nxt = None
+            if nxt is None:
+                continue
+            nstr = nxt.strftime("%H:%M")
+            if nstr < "09:45" or nstr > "14:30":
+                continue
+            ng = block_rows[block_rows["timestamp"] == nxt]
+            nmap = {r.symbol: r for r in ng.itertuples()}
+            for a, b, beta, key, sa, sb in cands:
+                if any(p["key"] == key for p in pos):
+                    continue
+                if len(pos) >= MAX_PAIRS:
+                    break
+                if any(sector_of(p["a"]) in (sa, sb) or sector_of(p["b"]) in (sa, sb) for p in pos):
+                    continue
+                r1, r2 = rowmap.get(a), rowmap.get(b)
+                if r1 is None or r2 is None:
+                    continue
+                s = float(r2.close) - beta * float(r1.close)
+                spread_hist[key].append(s)
+                z = zscore(np.array(spread_hist[key], float))
+                if abs(z) < ENTRY_Z or not np.isfinite(z):
+                    continue
+                f1, f2 = nmap.get(a), nmap.get(b)
+                if f1 is None or f2 is None:
+                    continue
+                p1, p2 = float(f1.open), float(f2.open)
+                q1, q2 = qty(p1, p2, beta)
+                if q1 < 1:
+                    continue
+                w = np.array(spread_hist[key][-L:], float)
+                mu0, sd0 = float(np.mean(w)), float(np.std(w, ddof=0))
+                if sd0 < 1e-9:
+                    continue
+                side = -1 if z > 0 else 1
+                pos.append(
+                    dict(
+                        a=a, b=b, beta=beta, key=key, q1=q1, q2=q2,
+                        e1=p1, e2=p2, side=side, mu0=mu0, sd0=sd0,
+                        bars=0, entry=nxt, block=bi,
+                    )
+                )
+            mtm = cash
+            for p in pos:
+                r1, r2 = rowmap.get(p["a"]), rowmap.get(p["b"])
+                if r1 is None:
+                    continue
+                mtm += p["side"] * (
+                    (float(r2.close) - p["e2"]) * p["q2"]
+                    - (float(r1.close) - p["e1"]) * p["q1"]
+                )
+            equity = mtm
+            peak = max(peak, equity)
+            maxdd = min(maxdd, (equity - peak) / peak if peak else 0)
+
+        if pos:
+            last_ts = block_rows["timestamp"].max()
+            g = block_rows[block_rows["timestamp"] == last_ts]
+            flatten({r.symbol: r for r in g.itertuples()}, "FORCED_1515", last_ts)
+        for t in trades:
+            if t.get("block") == bi:
+                block_pnl[t["key"]] += t["pnl"]
+        for key, pnl in block_pnl.items():
+            if pnl < 0:
+                banned[key] = banned.get(key, 0) + 1
+            else:
+                banned[key] = 0
+        for k in list(banned):
+            if banned[k] >= 2:
+                banned[k] = -3
+            elif banned[k] < 0:
+                banned[k] += 1
+                if banned[k] == 0:
+                    del banned[k]
+
+    n = len(trades)
+    wins = sum(1 for t in trades if t["pnl"] > 0)
+    gp = sum(t["pnl"] for t in trades if t["pnl"] > 0)
+    gl = -sum(t["pnl"] for t in trades if t["pnl"] <= 0)
+    pf = (gp / gl) if gl > 1e-9 else 0
+    reasons = defaultdict(int)
+    for t in trades:
+        reasons[t["reason"]] += 1
+    Path("output").mkdir(exist_ok=True)
+    lines = [
+        BANNER,
+        f"net_pnl {cash - CAPITAL:.2f}",
+        f"final_equity {cash:.2f}",
+        f"maxdd {maxdd*100:.2f}%",
+        f"trades {n} wins {wins} winrate {100*wins/max(n,1):.1f}%",
+        f"profit_factor {pf:.2f}",
+        f"exits {dict(reasons)}",
+        "This is not permission to paper or live trade.",
+    ]
+    Path("output/mis_first_run.txt").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()
