@@ -1,4 +1,12 @@
-"""Resumable old 15m Angel downloader. Historical data only. NO ORDERS."""
+"""
+Download 2024 Angel One 15-minute data for our NSE universe.
+
+DATA ONLY:
+- No strategy
+- No backtest
+- No orders
+- No credentials printed
+"""
 
 import json
 import os
@@ -11,9 +19,15 @@ import pyotp
 from SmartApi import SmartConnect
 from sector_map import SECTOR_MAP
 
-DB = "data/intraday_ohlcv.db"
-SCRIP_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
+DB = "data/intraday_ohlcv.db"
+
+SCRIP_URL = (
+    "https://margincalculator.angelbroking.com/"
+    "OpenAPI_File/files/OpenAPIScripMaster.json"
+)
+
+# 2024 ONLY
 WINDOWS = [
     ("2024-01-01 09:15", "2024-03-31 15:15"),
     ("2024-04-01 09:15", "2024-06-30 15:15"),
@@ -21,201 +35,624 @@ WINDOWS = [
     ("2024-10-01 09:15", "2024-12-31 15:15"),
 ]
 
-SKIP = {"HDFC", "TATAMOTORS"}
-ALIAS = {"M_M": "M&M"}
+# These are not currently usable members of our active universe.
+SKIP = {
+    "HDFC",
+    "TATAMOTORS",
+}
+
+ALIAS = {
+    "M_M": "M&M",
+}
+
 
 def load_env():
     p = Path(".env")
+
     if not p.exists():
         raise SystemExit("CREDENTIALS_MISSING")
-    for line in p.read_text().splitlines():
-        line=line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k,v=line.split("=",1)
-        os.environ.setdefault(k.strip(),v.strip())
 
-def universe():
-    out=[]
-    for x in SECTOR_MAP:
-        s=str(x).replace(".NS","").replace("-EQ","").strip()
-        if s in SKIP:
-            continue
-        out.append(ALIAS.get(s,s))
-    return out
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
 
-def tokens(symbols):
+        if not line:
+            continue
+
+        if line.startswith("#"):
+            continue
+
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+
+        os.environ.setdefault(
+            key.strip(),
+            value.strip()
+        )
+
+
+def get_universe():
+    symbols = []
+
+    for raw_symbol in SECTOR_MAP:
+        symbol = (
+            str(raw_symbol)
+            .replace(".NS", "")
+            .replace("-EQ", "")
+            .strip()
+        )
+
+        if symbol in SKIP:
+            continue
+
+        symbol = ALIAS.get(symbol, symbol)
+
+        if symbol not in symbols:
+            symbols.append(symbol)
+
+    return symbols
+
+
+def load_tokens(symbols):
     print("Loading Angel scrip master...")
-    with urllib.request.urlopen(SCRIP_URL,timeout=60) as r:
-        data=json.loads(r.read().decode())
-    want={x.upper() for x in symbols}
-    out={}
-    for row in data:
-        if row.get("exch_seg")!="NSE":
-            continue
-        sym=str(row.get("symbol") or "")
-        if not sym.endswith("-EQ"):
-            continue
-        base=sym[:-3]
-        if base.upper() in want:
-            out[base.upper()]=str(row.get("token"))
-    return out
 
-def login():
-    key=os.getenv("ANGEL_API_KEY")
-    cid=os.getenv("ANGEL_CLIENT_ID")
-    pwd=os.getenv("ANGEL_PASSWORD")
-    sec=os.getenv("ANGEL_TOTP_SECRET")
-    if not all([key,cid,pwd,sec]):
-        raise SystemExit("CREDENTIALS_MISSING")
-    obj=SmartConnect(api_key=key)
-    obj.generateSession(cid,pwd,pyotp.TOTP(sec).now())
+    with urllib.request.urlopen(
+        SCRIP_URL,
+        timeout=60
+    ) as response:
+
+        data = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    wanted = {
+        s.upper()
+        for s in symbols
+    }
+
+    result = {}
+
+    for row in data:
+
+        if row.get("exch_seg") != "NSE":
+            continue
+
+        symbol = str(
+            row.get("symbol") or ""
+        )
+
+        if not symbol.endswith("-EQ"):
+            continue
+
+        base = symbol[:-3]
+
+        if base.upper() in wanted:
+            result[base.upper()] = str(
+                row.get("token")
+            )
+
+    return result
+
+
+def angel_login():
+
+    api_key = os.getenv(
+        "ANGEL_API_KEY"
+    )
+
+    client_id = os.getenv(
+        "ANGEL_CLIENT_ID"
+    )
+
+    password = os.getenv(
+        "ANGEL_PASSWORD"
+    )
+
+    totp_secret = os.getenv(
+        "ANGEL_TOTP_SECRET"
+    )
+
+    if not all([
+        api_key,
+        client_id,
+        password,
+        totp_secret
+    ]):
+        raise SystemExit(
+            "CREDENTIALS_MISSING"
+        )
+
+    obj = SmartConnect(
+        api_key=api_key
+    )
+
+    totp = pyotp.TOTP(
+        totp_secret
+    ).now()
+
+    obj.generateSession(
+        client_id,
+        password,
+        totp
+    )
+
     return obj
 
-def init_db():
-    Path("data").mkdir(exist_ok=True)
-    con=sqlite3.connect(DB)
-    con.execute("""
-    CREATE TABLE IF NOT EXISTS intraday_ohlcv(
-      symbol TEXT NOT NULL,
-      interval TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      open REAL NOT NULL,
-      high REAL NOT NULL,
-      low REAL NOT NULL,
-      close REAL NOT NULL,
-      volume INTEGER NOT NULL,
-      PRIMARY KEY(symbol,interval,timestamp)
+
+def init_database():
+
+    Path("data").mkdir(
+        exist_ok=True
     )
-    """)
-    con.execute("""
-    CREATE TABLE IF NOT EXISTS old_fetch_progress(
-      symbol TEXT NOT NULL,
-      window_start TEXT NOT NULL,
-      window_end TEXT NOT NULL,
-      status TEXT NOT NULL,
-      rows INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY(symbol,window_start,window_end)
+
+    con = sqlite3.connect(DB)
+
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS intraday_ohlcv (
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume INTEGER NOT NULL,
+
+            PRIMARY KEY (
+                symbol,
+                interval,
+                timestamp
+            )
+        )
+        """
     )
-    """)
+
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS fetch_2024_progress (
+            symbol TEXT NOT NULL,
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            status TEXT NOT NULL,
+            rows INTEGER NOT NULL DEFAULT 0,
+
+            PRIMARY KEY (
+                symbol,
+                window_start,
+                window_end
+            )
+        )
+        """
+    )
+
     con.commit()
+
     return con
 
-def done(con,sym,start,end):
-    r=con.execute("""
-      SELECT status FROM old_fetch_progress
-      WHERE symbol=? AND window_start=? AND window_end=?
-    """,(sym,start,end)).fetchone()
-    return bool(r and r[0]=="DONE")
 
-def mark(con,sym,start,end,status,n):
-    con.execute("""
-      INSERT OR REPLACE INTO old_fetch_progress
-      (symbol,window_start,window_end,status,rows)
-      VALUES(?,?,?,?,?)
-    """,(sym,start,end,status,n))
+def chunk_done(
+    con,
+    symbol,
+    start,
+    end
+):
+
+    row = con.execute(
+        """
+        SELECT status
+
+        FROM fetch_2024_progress
+
+        WHERE symbol=?
+        AND window_start=?
+        AND window_end=?
+        """,
+
+        (
+            symbol,
+            start,
+            end
+        )
+    ).fetchone()
+
+    return bool(
+        row
+        and row[0] == "DONE"
+    )
+
+
+def mark_progress(
+    con,
+    symbol,
+    start,
+    end,
+    status,
+    rows
+):
+
+    con.execute(
+        """
+        INSERT OR REPLACE
+        INTO fetch_2024_progress
+        (
+            symbol,
+            window_start,
+            window_end,
+            status,
+            rows
+        )
+
+        VALUES (
+            ?, ?, ?, ?, ?
+        )
+        """,
+
+        (
+            symbol,
+            start,
+            end,
+            status,
+            rows
+        )
+    )
+
     con.commit()
 
-def save(con,sym,rows):
-    n=0
-    for r in rows:
+
+def save_rows(
+    con,
+    symbol,
+    rows
+):
+
+    count = 0
+
+    for row in rows:
+
         try:
-            ts=str(r[0]).replace("T"," ")[:19]
-            hh=ts[11:16]
-            if not ("09:15" <= hh <= "15:15"):
+
+            timestamp = (
+                str(row[0])
+                .replace("T", " ")[:19]
+            )
+
+            hhmm = timestamp[11:16]
+
+            if not (
+                "09:15"
+                <= hhmm
+                <= "15:15"
+            ):
                 continue
-            o,h,l,c=map(float,r[1:5])
-            vol=int(float(r[5]))
-            if min(o,h,l,c)<=0 or vol<0:
+
+            o = float(row[1])
+            h = float(row[2])
+            l = float(row[3])
+            c = float(row[4])
+
+            volume = int(
+                float(row[5])
+            )
+
+            if min(
+                o, h, l, c
+            ) <= 0:
                 continue
-            con.execute("""
-              INSERT OR REPLACE INTO intraday_ohlcv
-              (symbol,interval,timestamp,open,high,low,close,volume)
-              VALUES(?,?,?,?,?,?,?,?)
-            """,(sym,"15m",ts,o,h,l,c,vol))
-            n+=1
+
+            if volume < 0:
+                continue
+
+            con.execute(
+                """
+                INSERT OR REPLACE
+                INTO intraday_ohlcv
+                (
+                    symbol,
+                    interval,
+                    timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume
+                )
+
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+
+                (
+                    symbol,
+                    "15m",
+                    timestamp,
+                    o,
+                    h,
+                    l,
+                    c,
+                    volume
+                )
+            )
+
+            count += 1
+
         except Exception:
             continue
-    con.commit()
-    return n
 
-def fetch_with_retry(obj,token,start,end):
-    waits=[0,10,20,40,60]
-    for attempt,wait in enumerate(waits,1):
-        if wait:
-            print(f"    retry wait {wait}s")
-            time.sleep(wait)
+    con.commit()
+
+    return count
+
+
+def fetch_chunk(
+    obj,
+    token,
+    start,
+    end
+):
+
+    # Conservative retries because Angel
+    # rate-limited us in earlier downloads.
+    waits = [
+        0,
+        10,
+        20,
+        40,
+        60
+    ]
+
+    for attempt, wait_seconds in enumerate(
+        waits,
+        start=1
+    ):
+
+        if wait_seconds:
+
+            print(
+                f"    retry wait "
+                f"{wait_seconds}s"
+            )
+
+            time.sleep(
+                wait_seconds
+            )
+
         try:
-            raw=obj.getCandleData({
-                "exchange":"NSE",
-                "symboltoken":token,
-                "interval":"FIFTEEN_MINUTE",
-                "fromdate":start,
-                "todate":end,
-            })
-            rows=(raw or {}).get("data") or []
+
+            result = obj.getCandleData(
+                {
+                    "exchange": "NSE",
+
+                    "symboltoken":
+                        token,
+
+                    "interval":
+                        "FIFTEEN_MINUTE",
+
+                    "fromdate":
+                        start,
+
+                    "todate":
+                        end,
+                }
+            )
+
+            rows = (
+                (result or {})
+                .get("data")
+                or []
+            )
+
             return rows, True
+
         except Exception:
-            # Never print SDK exception; it may contain auth headers.
-            print(f"    request failed attempt {attempt}/{len(waits)}")
-    return [],False
+
+            # Do not print the raw SDK exception.
+            # It may expose authorization headers.
+            print(
+                "    request failed "
+                f"attempt "
+                f"{attempt}/"
+                f"{len(waits)}"
+            )
+
+    return [], False
+
+
+def print_coverage(con):
+
+    print("\n2024 COVERAGE")
+
+    rows = con.execute(
+        """
+        SELECT
+            symbol,
+            MIN(timestamp),
+            MAX(timestamp),
+            COUNT(*)
+
+        FROM intraday_ohlcv
+
+        WHERE interval='15m'
+        AND substr(
+            timestamp,
+            1,
+            4
+        )='2024'
+
+        GROUP BY symbol
+
+        ORDER BY symbol
+        """
+    ).fetchall()
+
+    for row in rows:
+        print(row)
+
+    failed_chunks = con.execute(
+        """
+        SELECT COUNT(*)
+
+        FROM fetch_2024_progress
+
+        WHERE status='FAILED'
+        """
+    ).fetchone()[0]
+
+    print(
+        "symbols_with_2024_data",
+        len(rows)
+    )
+
+    print(
+        "failed_chunks",
+        failed_chunks
+    )
+
 
 def main():
-    load_env()
-    syms=universe()
-    print("OLD_15M_FETCH — NO ORDERS")
-    print("symbols",len(syms),"windows",len(WINDOWS))
-    tok=tokens(syms)
-    obj=login()
-    con=init_db()
 
-    for si,sym in enumerate(syms,1):
-        token=tok.get(sym.upper())
+    load_env()
+
+    symbols = get_universe()
+
+    print(
+        "2024_15M_FETCH"
+    )
+
+    print(
+        "NO ORDERS / DATA ONLY"
+    )
+
+    print(
+        "symbols",
+        len(symbols),
+        "windows",
+        len(WINDOWS)
+    )
+
+    token_map = load_tokens(
+        symbols
+    )
+
+    obj = angel_login()
+
+    con = init_database()
+
+    total = len(symbols)
+
+    for symbol_number, symbol in enumerate(
+        symbols,
+        start=1
+    ):
+
+        token = token_map.get(
+            symbol.upper()
+        )
+
         if not token:
-            print(f"[{si}/{len(syms)}] {sym}: NO_TOKEN")
+
+            print(
+                f"[{symbol_number}/{total}] "
+                f"{symbol}: NO_TOKEN"
+            )
+
             continue
 
-        for wi,(start,end) in enumerate(WINDOWS,1):
-            if done(con,sym,start,end):
-                print(f"[{si}/{len(syms)}] {sym} W{wi}: SKIP_DONE")
+        for window_number, (
+            start,
+            end
+        ) in enumerate(
+            WINDOWS,
+            start=1
+        ):
+
+            if chunk_done(
+                con,
+                symbol,
+                start,
+                end
+            ):
+
+                print(
+                    f"[{symbol_number}/{total}] "
+                    f"{symbol} "
+                    f"W{window_number}: "
+                    "SKIP_DONE"
+                )
+
                 continue
 
-            print(f"[{si}/{len(syms)}] {sym} W{wi}: fetching")
+            print(
+                f"[{symbol_number}/{total}] "
+                f"{symbol} "
+                f"W{window_number}: "
+                "fetching"
+            )
+
+            # Keep request rate conservative.
             time.sleep(5)
 
-            rows,ok=fetch_with_retry(obj,token,start,end)
+            rows, success = fetch_chunk(
+                obj,
+                token,
+                start,
+                end
+            )
 
-            if not ok:
-                mark(con,sym,start,end,"FAILED",0)
-                print("    FAILED")
+            if not success:
+
+                mark_progress(
+                    con,
+                    symbol,
+                    start,
+                    end,
+                    "FAILED",
+                    0
+                )
+
+                print(
+                    "    FAILED"
+                )
+
                 continue
 
-            n=save(con,sym,rows)
-            mark(con,sym,start,end,"DONE",n)
-            print(f"    DONE rows={n}")
+            saved = save_rows(
+                con,
+                symbol,
+                rows
+            )
 
-    print("\nCOVERAGE")
-    q=con.execute("""
-      SELECT symbol,MIN(timestamp),MAX(timestamp),COUNT(*)
-      FROM intraday_ohlcv
-      WHERE interval='15m'
-      GROUP BY symbol
-      ORDER BY symbol
-    """).fetchall()
+            mark_progress(
+                con,
+                symbol,
+                start,
+                end,
+                "DONE",
+                saved
+            )
 
-    for r in q:
-        print(r)
+            print(
+                f"    DONE rows="
+                f"{saved}"
+            )
 
-    failed=con.execute("""
-      SELECT COUNT(*) FROM old_fetch_progress WHERE status='FAILED'
-    """).fetchone()[0]
-
-    print("symbols_cached",len(q))
-    print("failed_chunks",failed)
-    print("FETCH_COMPLETE")
-    print("NO ORDERS / NO BACKTEST")
+    print_coverage(
+        con
+    )
 
     con.close()
 
-if __name__=="__main__":
+    print(
+        "\nFETCH_2024_COMPLETE"
+    )
+
+    print(
+        "NO ORDERS / NO BACKTEST"
+    )
+
+
+if __name__ == "__main__":
     main()
